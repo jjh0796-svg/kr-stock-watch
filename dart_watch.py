@@ -550,7 +550,7 @@ def retry_pending_summaries(api_key: str, state: dict) -> None:
             info.get("kind", "earnings"), DOC_SUMMARIZERS["earnings"])
         summary = None
         try:
-            summary = fn(api_key, rcept_no)
+            summary = fn(api_key, rcept_no, {"code": info.get("code", "")})
         except Exception:
             pass
         if summary:

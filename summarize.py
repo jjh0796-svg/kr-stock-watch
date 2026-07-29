@@ -235,7 +235,7 @@ def _clip(m: re.Match | None, limit: int = 70) -> str | None:
     return esc(val[:limit]) if val else None
 
 
-def _sum_supply(api_key: str, rcept_no: str) -> str | None:
+def _sum_supply(api_key: str, rcept_no: str, ctx: dict | None = None) -> str | None:
     """단일판매ㆍ공급계약체결 — 계약내용·상대·금액·매출대비·기간"""
     text = _doc_text(api_key, rcept_no)
     dot = r"[ㆍ·・]?\s*"
@@ -275,7 +275,7 @@ def _sum_supply(api_key: str, rcept_no: str) -> str | None:
     return "\n".join(lines) if lines else None
 
 
-def _sum_ir(api_key: str, rcept_no: str) -> str | None:
+def _sum_ir(api_key: str, rcept_no: str, ctx: dict | None = None) -> str | None:
     """기업설명회(IR)개최 — 일시·방법·목적·내용 (코스닥/유가 서식 모두 대응)"""
     text = _doc_text(api_key, rcept_no)
     # 코스닥형: "시작일 종료일 시작시간 종료시간 2026-07-29 2026-07-29 14:00 15:00"
@@ -303,7 +303,52 @@ def _sum_ir(api_key: str, rcept_no: str) -> str | None:
     return "\n".join(lines) if lines else None
 
 
-def _sum_earnings(api_key: str, rcept_no: str) -> str | None:
+# 네이버 분기 재무: 과거 분기 실적(추이) + 다음 분기 컨센서스(isConsensus=Y), 단위 억원
+def _naver_quarters(code: str) -> tuple[list[tuple[str, dict]], tuple[str, dict] | None]:
+    r = requests.get(f"https://m.stock.naver.com/api/stock/{code}/finance/quarter",
+                     headers=UA_HEADERS, timeout=10)
+    info = r.json().get("financeInfo", {})
+    cols = [(t.get("key"), t.get("isConsensus") == "Y") for t in info.get("trTitleList", [])]
+    rows = {row.get("title"): row.get("columns", {})
+            for row in info.get("rowList", [])
+            if row.get("title") in ("매출액", "영업이익", "당기순이익")}
+
+    def cell(title, key):
+        return _num((rows.get(title, {}).get(key) or {}).get("value"))
+
+    past, cons = [], None
+    for key, is_cons in cols:
+        if not key:
+            continue
+        vals = {"rev": cell("매출액", key), "op": cell("영업이익", key),
+                "ni": cell("당기순이익", key)}
+        if is_cons:
+            cons = (key, vals)
+        elif vals["rev"] is not None:
+            past.append((key, vals))
+    past.sort(key=lambda x: x[0], reverse=True)
+    return past, cons
+
+
+def _infer_quarter(text: str, rcept_no: str) -> str:
+    """공시 원문 또는 접수월로 대상 분기 키('202606')를 추정."""
+    m = re.search(r"(20\d{2})\s*년\s*(?:제?\s*)?([1-4])\s*분기", text)
+    if m:
+        return f"{m.group(1)}{int(m.group(2)) * 3:02d}"
+    year, month = int(rcept_no[:4]), int(rcept_no[4:6])
+    q_by_month = {1: 4, 2: 4, 3: 4, 4: 1, 5: 1, 6: 1, 7: 2, 8: 2,
+                  9: 2, 10: 3, 11: 3, 12: 3}
+    q = q_by_month[month]
+    if q == 4:
+        year -= 1
+    return f"{year}{q * 3:02d}"
+
+
+def _qlabel(key: str) -> str:
+    return f"{key[:4]}.{int(key[4:6]) // 3}Q"
+
+
+def _sum_earnings(api_key: str, rcept_no: str, ctx: dict | None = None) -> str | None:
     text = _doc_text(api_key, rcept_no)
     unit = _detect_unit_won(text)
 
@@ -330,15 +375,44 @@ def _sum_earnings(api_key: str, rcept_no: str) -> str | None:
     if rev[0] <= 0 or abs(op[0]) > rev[0] * 3:
         return None  # 파싱 결과가 수상하면 요약 생략
 
-    def fmt(name, m):
+    # 컨센서스·최근 추이 (네이버 분기 재무 — 실패해도 기본 요약은 나간다)
+    code = (ctx or {}).get("code", "")
+    cur_key = _infer_quarter(text, rcept_no)
+    past, cons = [], None
+    if code:
+        try:
+            past, cons = _naver_quarters(code)
+        except Exception:
+            pass
+    cons_vals = cons[1] if cons and cons[0] == cur_key else None
+    # 네이버 컨센서스는 연결 기준 — 별도 실적 공시에는 기준을 명시해 혼동 방지
+    est_label = "예상" if "연결" in text[:400] else "예상(연결)"
+
+    def fmt(name, m, cons_key):
         if not m:
             return f"{name}: -"
         line = f"{name}: {_eok(m[0] * unit)}"
+        notes = []
         if m[1] is not None:
-            line += f" (YoY {m[1]:+.1f}%)"
+            notes.append(f"YoY {m[1]:+.1f}%")
+        est = cons_vals.get(cons_key) if cons_vals else None
+        if est:
+            actual_eok = m[0] * unit / 1e8
+            notes.append(f"{est_label} {est:,.0f}억 대비 {(actual_eok / est - 1) * 100:+.0f}%")
+        if notes:
+            line += f" ({' · '.join(notes)})"
         return line
 
-    return "\n".join([fmt("매출액", rev), fmt("영업익", op), fmt("순이익", ni)])
+    lines = [fmt("매출액", rev, "rev"), fmt("영업익", op, "op"), fmt("순이익", ni, "ni")]
+
+    trend = [(k, v) for k, v in past if k < cur_key][:4]
+    if trend:
+        lines.append("최근 추이 (매출/영업익/순이익)")
+        for k, v in trend:
+            lines.append(f" {_qlabel(k)} {_eok((v['rev'] or 0) * 1e8)}/"
+                         f" {_eok(v['op'] * 1e8) if v['op'] is not None else '-'}/"
+                         f" {_eok(v['ni'] * 1e8) if v['ni'] is not None else '-'}")
+    return "\n".join(lines)
 
 
 # ─── 디스패치 ──────────────────────────────────────────────────────────────────
@@ -392,7 +466,7 @@ def summarize(item: dict, api_key: str) -> str | None:
         kind = doc_kind(title)
         if kind:
             fn = DOC_SUMMARIZERS[kind][0]
-            return fn(api_key, rcept_no)
+            return fn(api_key, rcept_no, {"code": code, "corp_code": corp_code})
 
         # 주요사항보고서 계열 — 구조화 API
         if corp_code and rcept_dt:
