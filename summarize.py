@@ -228,6 +228,81 @@ def _detect_unit_won(text: str) -> float:
     return 1e6  # 공정공시 기본은 백만원
 
 
+def _clip(m: re.Match | None, limit: int = 70) -> str | None:
+    if not m:
+        return None
+    val = m.group(1).strip().strip("-").strip()
+    return esc(val[:limit]) if val else None
+
+
+def _sum_supply(api_key: str, rcept_no: str) -> str | None:
+    """단일판매ㆍ공급계약체결 — 계약내용·상대·금액·매출대비·기간"""
+    text = _doc_text(api_key, rcept_no)
+    dot = r"[ㆍ·・]?\s*"
+    what = _clip(re.search(rf"판매{dot}공급계약\s*내용\s*(.+?)\s*2\.\s*계약내역", text))
+    total = _num((re.search(r"계약금액\s*총액\s*\(원\)\s*([\d,\-]+)", text) or [None, None])[1])
+    sales = _num((re.search(r"최근\s*매출액\s*\(원\)\s*([\d,\-]+)", text) or [None, None])[1])
+    ratio = _num((re.search(r"매출액\s*대비\s*\(%\)\s*([\d.,\-]+)", text) or [None, None])[1])
+    party = _clip(re.search(r"\d\.\s*계약상대방\s*(.+?)\s*-?\s*최근\s*매출액", text))
+    region = _clip(re.search(rf"판매{dot}공급지역\s*(.+?)\s*\d\.\s*계약기간", text))
+    period = re.search(r"계약기간\s*시작일\s*([\d\-]+)\s*종료일\s*([\d\-]+)", text)
+
+    if total is None and not what:
+        return None
+    lines = []
+    if what:
+        lines.append(f"계약: {what}")
+    if party or region:
+        seg = [f"상대: {party}" if party else None, f"지역: {region}" if region else None]
+        lines.append(" · ".join(s for s in seg if s))
+    if total is not None:
+        line = f"금액: {_eok(total)}"
+        if ratio is not None:
+            line += f" (매출대비 {ratio:.1f}%)"
+        elif sales:
+            line += f" (매출대비 {total / sales * 100:.1f}%)"
+        lines.append(line)
+    if period:
+        beg, end = period.group(1), period.group(2)
+        months = ""
+        try:
+            b = (int(beg[:4]), int(beg[5:7]))
+            e = (int(end[:4]), int(end[5:7]))
+            months = f" ({(e[0] - b[0]) * 12 + e[1] - b[1]}개월)"
+        except ValueError:
+            pass
+        lines.append(f"기간: {beg} ~ {end}{months}")
+    return "\n".join(lines) if lines else None
+
+
+def _sum_ir(api_key: str, rcept_no: str) -> str | None:
+    """기업설명회(IR)개최 — 일시·방법·목적·내용 (코스닥/유가 서식 모두 대응)"""
+    text = _doc_text(api_key, rcept_no)
+    # 코스닥형: "시작일 종료일 시작시간 종료시간 2026-07-29 2026-07-29 14:00 15:00"
+    when = re.search(r"시작일\s*종료일\s*시작시간\s*종료시간\s*([\d\-]+)\s*[\d\-]+\s*([\d:]+)", text)
+    # 유가형: "1. 일시 및 장소 일시 2026-08-05 16:00 장소 ..."
+    if not when:
+        when = re.search(r"일시\s*(\d{4}-[\d\-]+)\s*([\d:]+)\s*장소", text)
+    method = (_clip(re.search(r"실시방법\s*(.+?)\s*\d\.\s*주요내용", text))
+              or _clip(re.search(r"개최방법\s*(.+?)\s*\d\.\s*", text)))
+    purpose = (_clip(re.search(r"실시목적\s*(.+?)\s*\d\.\s*실시방법", text))
+               or _clip(re.search(r"개최목적\s*(.+?)\s*\d\.\s*개최방법", text)))
+    detail = (_clip(re.search(r"주요\s*설명회내용(?:\(요약\))?\s*(.+?)\s*\d\.\s*", text), 90)
+              or _clip(re.search(r"주요내용\s*(.+?)\s*\d\.\s*", text), 90))
+
+    lines = []
+    if when:
+        line = f"일시: {when.group(1)} {when.group(2)}"
+        if method:
+            line += f" · {method}"
+        lines.append(line)
+    if purpose:
+        lines.append(f"목적: {purpose}")
+    if detail:
+        lines.append(f"내용: {detail}")
+    return "\n".join(lines) if lines else None
+
+
 def _sum_earnings(api_key: str, rcept_no: str) -> str | None:
     text = _doc_text(api_key, rcept_no)
     unit = _detect_unit_won(text)
@@ -268,6 +343,25 @@ def _sum_earnings(api_key: str, rcept_no: str) -> str | None:
 
 # ─── 디스패치 ──────────────────────────────────────────────────────────────────
 
+# 원문 파싱 계열: kind → (요약 함수, 후속 메시지 라벨, 이모지)
+DOC_SUMMARIZERS: dict[str, tuple[object, str, str]] = {
+    "earnings": (_sum_earnings, "실적요약", "📈"),
+    "supply": (_sum_supply, "계약요약", "📝"),
+    "ir": (_sum_ir, "IR요약", "🔔"),
+}
+
+
+def doc_kind(title: str) -> str | None:
+    """원문 파싱으로 요약하는 서식인지 판별 (제목은 공백 제거 후)."""
+    t = re.sub(r"\s+", "", title or "")
+    if re.search(r"영업\(잠정\)실적", t):
+        return "earnings"
+    if re.search(r"단일판매|공급계약체결", t):
+        return "supply"
+    if re.search(r"기업설명회", t):
+        return "ir"
+    return None
+
 # (제목 정규식, DART API 이름, 요약 함수) — None API는 원문 파싱 계열
 _RULES: list[tuple[str, str | None, object]] = [
     (r"자기주식취득신탁계약체결결정", "tsstkAqTrctrCnsDecsn", _sum_trust),
@@ -294,9 +388,11 @@ def summarize(item: dict, api_key: str) -> str | None:
     rcept_dt = item.get("rcept_dt") or ""
 
     try:
-        # 잠정실적 — 원문 표 파싱
-        if re.search(r"영업\(잠정\)실적", title):
-            return _sum_earnings(api_key, rcept_no)
+        # 원문 파싱 계열 (잠정실적·공급계약·IR)
+        kind = doc_kind(title)
+        if kind:
+            fn = DOC_SUMMARIZERS[kind][0]
+            return fn(api_key, rcept_no)
 
         # 주요사항보고서 계열 — 구조화 API
         if corp_code and rcept_dt:

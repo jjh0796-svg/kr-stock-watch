@@ -25,7 +25,7 @@ import requests
 
 from common import (DRY_RUN, UA_HEADERS, esc, load_state, load_watch_config,
                     load_watchlist, now_kst, save_state, save_watch_config, tg_send)
-from summarize import _sum_earnings, summarize
+from summarize import DOC_SUMMARIZERS, doc_kind, summarize
 
 DART_LIST_URL = "https://opendart.fss.or.kr/api/list.json"
 DART_VIEWER = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="
@@ -95,9 +95,10 @@ DISCLOSURE_TYPES: list[tuple[str, str, str]] = [
     ("불성실공시법인지정", r"불성실공시", "⚖️"),
     ("횡령ㆍ배임혐의발생", r"횡령|배임", "⚖️"),
     ("감사보고서제출", r"감사보고서제출|감사의견", "⚖️"),
-    # 시장 조치·해명
+    # 시장 조치·해명·안내
     ("조회공시요구", r"조회공시요구", "🔔"),
     ("풍문또는보도에대한해명", r"풍문또는보도", "🔔"),
+    ("기업설명회(IR)개최", r"기업설명회", "🔔"),
     # 지분 공시 (전 종목 — 보고자 키워드 필터)
     ("주식등의대량보유상황보고서", r"대량보유상황보고서", "🏛"),
 ]
@@ -517,11 +518,12 @@ def poll_once(api_key: str, state: dict, cfg: dict) -> None:
             if summary:
                 head, _, link = msg.rpartition("\n")
                 msg = f"{head}\n{summary}\n{link}"
-            elif re.search(r"영업\(잠정\)실적", re.sub(r"\s+", "", it.get("report_nm") or "")):
+            elif doc_kind(it.get("report_nm")):
                 # 접수 직후엔 원문 파일 등록이 늦다(014) — 알림은 먼저 보내고
                 # 요약은 원문이 올라오는 대로 후속 메시지로 발송
                 state.setdefault("pending_sum", {})[it["rcept_no"]] = {
                     "tries": 0,
+                    "kind": doc_kind(it.get("report_nm")),
                     "corp": it.get("corp_name", ""),
                     "code": (it.get("stock_code") or "").strip(),
                 }
@@ -538,33 +540,29 @@ def poll_once(api_key: str, state: dict, cfg: dict) -> None:
 
 
 def retry_pending_summaries(api_key: str, state: dict) -> None:
-    """원문 등록 지연으로 미뤄둔 잠정실적 요약을 재시도 (최대 20분)."""
+    """원문 등록 지연으로 미뤄둔 요약(실적·계약·IR)을 재시도 (최대 20분)."""
     pending: dict = state.get("pending_sum", {})
     if not pending:
         return
-    changed = False
     for rcept_no, info in list(pending.items()):
         info["tries"] = info.get("tries", 0) + 1
+        fn, label, emoji = DOC_SUMMARIZERS.get(
+            info.get("kind", "earnings"), DOC_SUMMARIZERS["earnings"])
         summary = None
         try:
-            summary = _sum_earnings(api_key, rcept_no)
+            summary = fn(api_key, rcept_no)
         except Exception:
             pass
         if summary:
             code = info.get("code", "")
             code_tag = f" ({code})" if code else ""
-            tg_send(f"📈 <b>[실적요약] {esc(info.get('corp', ''))}</b>{code_tag}\n"
+            tg_send(f"{emoji} <b>[{label}] {esc(info.get('corp', ''))}</b>{code_tag}\n"
                     f"{summary}\n{DART_VIEWER}{rcept_no}")
             del pending[rcept_no]
-            changed = True
         elif info["tries"] >= 20:
             print(f"[요약 포기] {rcept_no} — 원문 미등록 20회 초과")
             del pending[rcept_no]
-            changed = True
-        else:
-            changed = True  # tries 카운트 저장
-    if changed:
-        save_state(STATE_FILE, state)
+    save_state(STATE_FILE, state)
 
 
 def in_window() -> bool:
