@@ -118,12 +118,44 @@ def merged_watchlist(cfg: dict) -> dict[str, str]:
     return merged
 
 
+# ─── 종목명 ↔ 종목코드 자동 매칭 (다음증권) ───────────────────────────────────
+
+_DAUM_HEADERS = {**UA_HEADERS, "Referer": "https://finance.daum.net/"}
+
+
+def daum_name_of(code: str) -> str | None:
+    """종목코드 → 종목명"""
+    try:
+        r = requests.get(f"https://finance.daum.net/api/quotes/A{code}",
+                         params={"summary": "false"}, headers=_DAUM_HEADERS, timeout=8)
+        if r.status_code == 200:
+            return r.json().get("name")
+    except Exception:
+        pass
+    return None
+
+
+def daum_search(query: str) -> list[tuple[str, str]]:
+    """검색어 → [(종목코드, 종목명)] (국내 상장 종목만)"""
+    try:
+        r = requests.get("https://finance.daum.net/api/search/quotes",
+                         params={"q": query}, headers=_DAUM_HEADERS, timeout=8)
+        out = []
+        for q in r.json().get("quotes", [])[:8]:
+            sym = q.get("symbolCode") or ""
+            if re.fullmatch(r"A[0-9A-Z]{6}", sym):
+                out.append((sym[1:], q.get("name") or sym[1:]))
+        return out
+    except Exception:
+        return []
+
+
 # ─── 텔레그램 명령 처리 ────────────────────────────────────────────────────────
 
 HELP_TEXT = (
     "🤖 <b>사용법</b>\n"
-    "/추가 005930 삼성전자 — 관심종목 추가\n"
-    "/삭제 005930 — 관심종목 제외\n"
+    "/추가 005930 또는 /추가 에프에스티 — 관심종목 추가 (이름·코드 자동 매칭)\n"
+    "/삭제 005930 또는 /삭제 에프에스티 — 관심종목 제외\n"
     "/목록 — 현재 관심종목·설정 보기\n"
     "/유형 — 감시 중인 공시 서식 목록(번호) 보기\n"
     "/유형 7 끄기 — 7번 서식 알림 중단 (여러 개: /유형 7 8 9 끄기)\n"
@@ -143,25 +175,59 @@ def handle_command(text: str, cfg: dict) -> str | None:
     cmd = parts[0].lower()
 
     if cmd in ("/추가", "/add"):
-        if len(parts) < 2 or not re.fullmatch(r"[0-9A-Z]{6}", parts[1]):
-            return "형식: /추가 종목코드6자리 [이름]\n예: /추가 005930 삼성전자"
-        code = parts[1]
-        name = " ".join(parts[2:]) or code
+        if len(parts) < 2:
+            return "형식: /추가 종목코드 또는 /추가 종목명\n예: /추가 005930 · /추가 에프에스티"
+        arg = " ".join(parts[1:]).strip()
+        if re.fullmatch(r"[0-9A-Z]{6}", parts[1]):        # 코드로 추가 → 이름 자동 매칭
+            code = parts[1]
+            name = " ".join(parts[2:]).strip() or daum_name_of(code) or code
+        else:                                              # 이름으로 추가 → 코드 자동 매칭
+            results = daum_search(arg)
+            exact = [r for r in results if r[1] == arg]
+            if exact:
+                code, name = exact[0]
+            elif len(results) == 1:
+                code, name = results[0]
+            elif len(results) > 1:
+                lines = [f" • {esc(n)} ({c})" for c, n in results[:5]]
+                return ("🔎 여러 종목이 검색됐습니다. 코드로 지정해 주세요:\n"
+                        + "\n".join(lines) + "\n예: /추가 " + results[0][0])
+            else:
+                return f"'{esc(arg)}' 종목을 찾지 못했습니다. 코드로 시도해 보세요."
         cfg["add"][code] = name
         cfg["remove"] = [c for c in cfg["remove"] if c != code]
         return f"✅ {esc(name)} ({code}) 추가됨 · 현재 {len(merged_watchlist(cfg))}종목"
 
     if cmd in ("/삭제", "/제거", "/remove"):
         if len(parts) < 2:
-            return "형식: /삭제 종목코드6자리"
-        code = parts[1]
-        name = merged_watchlist(cfg).get(code, code)
+            return "형식: /삭제 종목코드 또는 /삭제 종목명"
+        arg = " ".join(parts[1:]).strip()
+        watch = merged_watchlist(cfg)
+        if re.fullmatch(r"[0-9A-Z]{6}", arg):
+            code = arg
+        else:                                              # 이름으로 삭제
+            hits = [c for c, n in watch.items() if n == arg]
+            if not hits:
+                hits = [c for c, n in watch.items() if arg in n]
+            if not hits:
+                return f"관심종목에서 '{esc(arg)}' 을 찾지 못했습니다. /목록 으로 확인하세요."
+            if len(hits) > 1:
+                lines = [f" • {esc(watch[c])} ({c})" for c in hits[:5]]
+                return "🔎 여러 개가 일치합니다. 코드로 지정해 주세요:\n" + "\n".join(lines)
+            code = hits[0]
+        name = watch.get(code, code)
         cfg["add"].pop(code, None)
         if code not in cfg["remove"]:
             cfg["remove"].append(code)
         return f"🗑 {esc(name)} ({code}) 제외됨 · 현재 {len(merged_watchlist(cfg))}종목"
 
     if cmd in ("/목록", "/list"):
+        # 코드만 등록돼 이름이 비어 있는 종목은 이름을 자동 보완
+        for code, name in list(cfg.get("add", {}).items())[:10]:
+            if name == code:
+                found = daum_name_of(code)
+                if found:
+                    cfg["add"][code] = found
         watch = merged_watchlist(cfg)
         lines = [f" • {esc(n)} ({c})" for c, n in sorted(watch.items(), key=lambda x: x[1])]
         off = sorted(types_off(cfg))
