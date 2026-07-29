@@ -318,19 +318,53 @@ def handle_command(text: str, cfg: dict) -> str | None:
     return HELP_TEXT
 
 
-def process_commands(cfg: dict) -> bool:
-    """봇 대화방의 새 메시지를 명령으로 처리. 설정이 바뀌면 True."""
+# 텔레그램 "/" 팝업 메뉴 (봇 명령은 영문만 등록 가능 — 한국어 명령과 병행 동작)
+COMMAND_MENU = [
+    ("list", "관심종목·설정 보기 (=/목록)"),
+    ("types", "감시 공시 서식 보기·켜기/끄기 (=/유형)"),
+    ("all", "전 종목 구독 관리 (=/전체)"),
+    ("add", "종목 추가 — 뒤에 이름이나 코드 (=/추가)"),
+    ("remove", "종목 제외 (=/삭제)"),
+    ("keyword", "감시 키워드 추가/삭제 (=/키워드)"),
+    ("help", "사용법 안내"),
+]
+
+
+def register_menu() -> None:
+    """'/' 입력 시 뜨는 명령 팝업 메뉴 등록 (잡 시작마다 1회, 멱등)."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    if not token or DRY_RUN:
+        return
+    try:
+        requests.post(f"https://api.telegram.org/bot{token}/setMyCommands",
+                      json={"commands": [{"command": c, "description": d}
+                                         for c, d in COMMAND_MENU]},
+                      timeout=10)
+    except Exception as e:
+        print(f"[TG] setMyCommands 실패: {e}")
+
+
+def process_commands(cfg: dict, wait: int = 0) -> bool:
+    """봇 대화방의 새 메시지를 명령으로 처리. 설정이 바뀌면 True.
+
+    wait>0 이면 텔레그램 롱폴링으로 최대 wait초 대기 — 메시지가 오는 즉시
+    깨어나 답하므로 감시 시간대에는 명령 응답이 수 초 안에 온다.
+    (대기 시간이 DART 폴링 사이의 sleep 역할을 겸한다)
+    """
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
     if not token or not chat_id or DRY_RUN:
+        if wait:
+            time.sleep(wait)
         return False
     try:
         r = requests.get(f"https://api.telegram.org/bot{token}/getUpdates",
-                         params={"offset": cfg.get("tg_offset", 0) + 1, "timeout": 0},
-                         timeout=10)
+                         params={"offset": cfg.get("tg_offset", 0) + 1, "timeout": wait},
+                         timeout=(10, wait + 15))
         updates = r.json().get("result", [])
     except Exception as e:
         print(f"[TG] getUpdates 실패: {e}")
+        time.sleep(min(wait or 5, 10))
         return False
 
     changed = False
@@ -486,10 +520,13 @@ def main() -> None:
 
     state = load_state(STATE_FILE, {})
     deadline = time.monotonic() + POLL_TOTAL_SECONDS
+    register_menu()
+
+    # 시작 직후 밀린 명령 먼저 처리
+    if process_commands(cfg):
+        save_watch_config(cfg)
 
     while True:
-        if process_commands(cfg):
-            save_watch_config(cfg)
         if not in_window():
             print(f"[{now_kst():%a %H:%M}] 감시 시간대 밖 — 명령만 처리하고 종료")
             break
@@ -500,7 +537,9 @@ def main() -> None:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             break
-        time.sleep(min(POLL_INTERVAL, max(remaining, 1)))
+        # DART 폴링 사이 대기 = 텔레그램 롱폴링 (명령 오면 즉시 처리)
+        if process_commands(cfg, wait=int(min(POLL_INTERVAL, max(remaining, 1)))):
+            save_watch_config(cfg)
 
 
 if __name__ == "__main__":
