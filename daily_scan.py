@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 
 import requests
 
-from common import UA_HEADERS, esc, load_state, load_watchlist, now_kst, save_state, tg_send_long
+from common import UA_HEADERS, effective_watchlist, esc, load_state, now_kst, save_state, tg_send_long
 
 KRX_AUTH_KEY = os.environ.get("KRX_AUTH_KEY", "")
 KRX_STO_URL = "http://data-dbg.krx.co.kr/svc/apis/sto/{api}"
@@ -301,7 +301,7 @@ def scan_credit() -> str | None:
 def main() -> None:
     if not KRX_AUTH_KEY:
         raise SystemExit("KRX_AUTH_KEY 환경변수가 필요합니다")
-    watch = load_watchlist()
+    watch = effective_watchlist()  # 시드 + 텔레그램 /추가·/삭제 반영본
     state = load_state(STATE_FILE, {})
 
     base_dd, rows = find_base_date()

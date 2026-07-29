@@ -114,7 +114,32 @@ def save_state(name: str, data) -> None:
     os.replace(tmp, path)
 
 
-# ─── 관심종목 ──────────────────────────────────────────────────────────────────
+# ─── 동적 설정 (텔레그램 명령으로 갱신, dart-watch의 상태 캐시에 저장) ────────
+
+CONFIG_FILE = "watch_config.json"
+DEFAULT_CONFIG = {"add": {}, "remove": [], "keywords_extra": [], "groups_off": [], "tg_offset": 0}
+
+
+def load_watch_config() -> dict:
+    cfg = load_state(CONFIG_FILE, {})
+    return {**DEFAULT_CONFIG, **cfg}
+
+
+def save_watch_config(cfg: dict) -> None:
+    save_state(CONFIG_FILE, cfg)
+
+
+def effective_watchlist() -> dict[str, str]:
+    """시드(시크릿/CSV) + 텔레그램으로 추가한 종목 − 삭제한 종목."""
+    cfg = load_watch_config()
+    merged = dict(load_watchlist())
+    merged.update(cfg.get("add", {}))
+    for code in cfg.get("remove", []):
+        merged.pop(code, None)
+    return merged
+
+
+# ─── 관심종목 시드 ─────────────────────────────────────────────────────────────
 # 우선순위: WATCHLIST 환경변수("005930:삼성전자,000660:SK하이닉스")
 #           → watchlist.csv (한 줄에 "종목코드,종목명")
 

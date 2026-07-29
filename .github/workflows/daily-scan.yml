@@ -71,6 +71,16 @@ jobs:
           restore-keys: |
             scan-state-
 
+      # 텔레그램 /추가·/삭제가 반영된 watch_config.json은 DART 워처의 캐시에 있다.
+      # 나중에 복원해야 스캔 캐시에 섞여 있던 옛 사본을 덮어쓴다(최신 우선).
+      - name: Restore watch config from DART watch state
+        uses: actions/cache/restore@v4
+        with:
+          path: .state
+          key: dart-config-${{ github.run_id }}
+          restore-keys: |
+            dart-state-
+
       - name: Run daily scan
         env:
           KRX_AUTH_KEY: ${{ secrets.KRX_AUTH_KEY }}
