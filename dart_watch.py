@@ -46,8 +46,9 @@ OVERHANG_RE = re.compile(
 )
 
 # 3) 대량보유 보고자 키워드 (전 종목 대상, 쉼표로 추가 가능)
-FILER_KEYWORDS = [k.strip() for k in os.environ.get(
-    "FILER_KEYWORDS", "국민연금"
+#    환경변수가 빈 값으로 넘어와도 기본값이 살아야 한다 (Actions vars 미설정 시)
+FILER_KEYWORDS = [k.strip() for k in (
+    os.environ.get("FILER_KEYWORDS") or "국민연금"
 ).split(",") if k.strip()]
 
 
