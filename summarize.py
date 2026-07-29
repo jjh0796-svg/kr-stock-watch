@@ -1,0 +1,309 @@
+# ==========================================
+# 📄 탐지된 공시의 내용 요약
+#   - 주요사항보고서 계열: DART 구조화 JSON API (자사주·증자·CB·감자 등)
+#   - 잠정실적: 원문(zip) 표 파싱 (kr-earnings-pulse에서 검증된 방식)
+#   - 5% 대량보유: majorstock API
+# 요약은 "탐지되어 알림이 나가는 건"에만 호출된다 (건당 DART 1~2회 + 네이버 1회).
+# 실패하면 None을 돌려주고 알림은 요약 없이 그대로 나간다.
+# ==========================================
+import io
+import re
+import zipfile
+
+import requests
+
+from common import UA_HEADERS, esc
+
+DART_BASE = "https://opendart.fss.or.kr/api"
+
+
+def _num(v) -> float | None:
+    """DART 숫자 문자열('1,234', '-', '') → float"""
+    s = str(v or "").replace(",", "").replace("△", "-").strip()
+    if not s or s in ("-", "."):
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _eok(won: float | None) -> str:
+    if won is None:
+        return "-"
+    if abs(won) >= 1e12:
+        return f"{won / 1e12:,.1f}조"
+    return f"{won / 1e8:,.0f}억"
+
+
+def _shares(v) -> str:
+    n = _num(v)
+    return f"{n:,.0f}주" if n is not None else "-"
+
+
+# ─── 시가총액 (네이버) ─────────────────────────────────────────────────────────
+
+def market_cap(code: str) -> float | None:
+    """네이버 종목 API의 '시총'("1,335조 8,747억") → 원 단위 float"""
+    try:
+        r = requests.get(f"https://m.stock.naver.com/api/stock/{code}/integration",
+                         headers=UA_HEADERS, timeout=8)
+        for info in r.json().get("totalInfos", []):
+            if info.get("key") == "marketValue" or info.get("code") == "marketValue" \
+                    or "시총" in str(info.get("key", "")):
+                txt = str(info.get("value", ""))
+                jo = re.search(r"([\d,]+)\s*조", txt)
+                eok = re.search(r"([\d,]+)\s*억", txt)
+                total = 0.0
+                if jo:
+                    total += float(jo.group(1).replace(",", "")) * 1e12
+                if eok:
+                    total += float(eok.group(1).replace(",", "")) * 1e8
+                return total or None
+    except Exception:
+        pass
+    return None
+
+
+def _vs_cap(won: float | None, code: str) -> str:
+    if not won:
+        return ""
+    cap = market_cap(code)
+    if not cap:
+        return ""
+    return f" · 시총대비 {won / cap * 100:.1f}%"
+
+
+# ─── DART 구조화 API 공통 ──────────────────────────────────────────────────────
+
+def _dart_rows(api: str, api_key: str, corp_code: str, rcept_dt: str) -> list[dict]:
+    try:
+        r = requests.get(f"{DART_BASE}/{api}.json",
+                         params={"crtfc_key": api_key, "corp_code": corp_code,
+                                 "bgn_de": rcept_dt, "end_de": rcept_dt},
+                         headers=UA_HEADERS, timeout=15)
+        d = r.json()
+        if d.get("status") != "000":
+            return []
+        return d.get("list", [])
+    except Exception:
+        return []
+
+
+def _pick(rows: list[dict], rcept_no: str) -> dict | None:
+    for row in rows:
+        if row.get("rcept_no") == rcept_no:
+            return row
+    return rows[-1] if rows else None
+
+
+# ─── 서식별 요약 ───────────────────────────────────────────────────────────────
+
+def _sum_treasury_buy(row: dict, code: str) -> str:
+    prc = _num(row.get("aqpln_prc_ostk"))
+    lines = [f"취득: 보통주 {_shares(row.get('aqpln_stk_ostk'))} ({_eok(prc)})"
+             + _vs_cap(prc, code)]
+    if row.get("aq_pp"):
+        lines.append(f"목적: {esc(str(row['aq_pp'])[:60])}")
+    if row.get("aq_mth"):
+        lines.append(f"방법: {esc(row['aq_mth'])}")
+    return "\n".join(lines)
+
+
+def _sum_treasury_sell(row: dict, code: str) -> str:
+    prc = _num(row.get("dppln_prc_ostk"))
+    lines = [f"처분: 보통주 {_shares(row.get('dppln_stk_ostk'))} ({_eok(prc)})"
+             + _vs_cap(prc, code)]
+    if row.get("dp_pp"):
+        lines.append(f"목적: {esc(str(row['dp_pp'])[:60])}")
+    return "\n".join(lines)
+
+
+def _sum_trust(row: dict, code: str) -> str:
+    prc = _num(row.get("ctr_prc"))
+    out = f"신탁계약금액: {_eok(prc)}" + _vs_cap(prc, code)
+    if row.get("ctr_pd_bgd"):
+        out += f"\n계약기간: {row.get('ctr_pd_bgd')} ~ {row.get('ctr_pd_edd', '')}"
+    return out
+
+
+def _sum_rights_issue(row: dict, code: str) -> str:
+    cnt = row.get("nstk_ostk_cnt") or row.get("piic_nstk_ostk_cnt")
+    total = sum(filter(None, (
+        _num(row.get(k)) for k in
+        ("fdpp_fclt", "fdpp_bsninh", "fdpp_op", "fdpp_dtrp", "fdpp_ocsa", "fdpp_etc",
+         "piic_fdpp_fclt", "piic_fdpp_bsninh", "piic_fdpp_op", "piic_fdpp_dtrp",
+         "piic_fdpp_ocsa", "piic_fdpp_etc"))))
+    mth = row.get("ic_mthn") or row.get("piic_ic_mthn") or ""
+    out = f"신주: 보통주 {_shares(cnt)}"
+    if total:
+        out += f" · 조달 {_eok(total)}" + _vs_cap(total, code)
+    if mth:
+        out += f"\n방식: {esc(mth)}"
+    return out
+
+
+def _sum_bonus_issue(row: dict, code: str) -> str:
+    cnt = row.get("nstk_ostk_cnt") or row.get("fric_nstk_ostk_cnt")
+    per = row.get("nstk_ascnt_ps_ostk") or row.get("fric_nstk_ascnt_ps_ostk")
+    std = row.get("nstk_asstd") or row.get("fric_nstk_asstd") or ""
+    out = f"신주: 보통주 {_shares(cnt)}"
+    if _num(per) is not None:
+        out += f" · 1주당 {_num(per):g}주 배정"
+    if std:
+        out += f"\n기준일: {std}"
+    return out
+
+
+def _sum_capital_reduction(row: dict, code: str) -> str:
+    rt = row.get("cr_rt_ostk") or row.get("cr_rt")
+    out = f"감자: 보통주 {_shares(row.get('crstk_ostk_cnt'))}"
+    if rt:
+        out += f" · 감자비율 {rt}%"
+    if row.get("crsc_mtd"):
+        out += f"\n방법: {esc(str(row['crsc_mtd'])[:60])}"
+    return out
+
+
+def _sum_cb(row: dict, code: str, kind: str) -> str:
+    fta = _num(row.get("bd_fta"))
+    prc = _num(row.get("cv_prc") or row.get("ex_prc") or row.get("act_prc"))
+    tm = row.get("bd_tm", "")
+    out = f"{kind} {tm}회차 · 권면총액 {_eok(fta)}" + _vs_cap(fta, code)
+    if prc:
+        out += f"\n전환/행사가: {prc:,.0f}원"
+        if fta:
+            out += f" → 전환가능 약 {fta / prc:,.0f}주"
+    beg = row.get("cv_rqpd_bgd") or row.get("ex_rqpd_bgd") or row.get("expd_bgd")
+    if beg:
+        out += f"\n청구가능: {beg}부터"
+    return out
+
+
+def _sum_major_stock(row: dict, code: str) -> str:
+    lines = []
+    if row.get("repror"):
+        lines.append(f"대표보고: {esc(row['repror'])}")
+    rt, delta = _num(row.get("stkrt")), _num(row.get("stkrt_irds"))
+    if rt is not None:
+        line = f"보유비율: {rt:.2f}%"
+        if delta:
+            line += f" ({delta:+.2f}%p)"
+        lines.append(line)
+    if row.get("report_tp"):
+        lines.append(f"보고구분: {esc(row['report_tp'])}")
+    if row.get("report_resn"):
+        lines.append(f"사유: {esc(str(row['report_resn'])[:70])}")
+    return "\n".join(lines)
+
+
+# ─── 잠정실적 원문 파싱 (kr-earnings-pulse 검증 로직) ─────────────────────────
+
+def _doc_text(api_key: str, rcept_no: str) -> str:
+    resp = requests.get(f"{DART_BASE}/document.xml",
+                        params={"crtfc_key": api_key, "rcept_no": rcept_no},
+                        headers=UA_HEADERS, timeout=30)
+    resp.raise_for_status()
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    texts = []
+    for name in zf.namelist():
+        raw = zf.read(name)
+        for enc in ("utf-8", "euc-kr", "cp949"):
+            try:
+                texts.append(raw.decode(enc))
+                break
+            except UnicodeDecodeError:
+                continue
+    text = re.sub(r"<[^>]+>", " ", " ".join(texts))
+    return re.sub(r"\s+", " ", text)
+
+
+def _detect_unit_won(text: str) -> float:
+    if re.search(r"단위\s*[:：]?\s*조\s*원", text):
+        return 1e12
+    if re.search(r"단위\s*[:：]?\s*억\s*원", text):
+        return 1e8
+    if re.search(r"단위\s*[:：]?\s*천\s*원", text):
+        return 1e3
+    return 1e6  # 공정공시 기본은 백만원
+
+
+def _sum_earnings(api_key: str, rcept_no: str) -> str | None:
+    text = _doc_text(api_key, rcept_no)
+    unit = _detect_unit_won(text)
+
+    def metric(label: str) -> tuple[float, float | None] | None:
+        m = re.search(re.escape(label)
+                      + r"\s*당해실적((?:\s*(?:-|△?[\d,]+(?:\.\d+)?)){3,9})", text)
+        if not m:
+            return None
+        toks = re.findall(r"△?[\d,]+(?:\.\d+)?", m.group(1))
+        nums = []
+        for t in toks:
+            try:
+                nums.append(float(t.replace(",", "").replace("△", "-")))
+            except ValueError:
+                return None
+        if not nums:
+            return None
+        yoy = nums[-1] if len(nums) >= 3 and abs(nums[-1]) < 5000 else None
+        return nums[0], yoy
+
+    rev, op, ni = metric("매출액"), metric("영업이익"), metric("당기순이익")
+    if not rev or not op:
+        return None
+    if rev[0] <= 0 or abs(op[0]) > rev[0] * 3:
+        return None  # 파싱 결과가 수상하면 요약 생략
+
+    def fmt(name, m):
+        if not m:
+            return f"{name}: -"
+        line = f"{name}: {_eok(m[0] * unit)}"
+        if m[1] is not None:
+            line += f" (YoY {m[1]:+.1f}%)"
+        return line
+
+    return "\n".join([fmt("매출액", rev), fmt("영업익", op), fmt("순이익", ni)])
+
+
+# ─── 디스패치 ──────────────────────────────────────────────────────────────────
+
+# (제목 정규식, DART API 이름, 요약 함수) — None API는 원문 파싱 계열
+_RULES: list[tuple[str, str | None, object]] = [
+    (r"자기주식취득신탁계약체결결정", "tsstkAqTrctrCnsDecsn", _sum_trust),
+    (r"자기주식취득신탁계약해지결정", "tsstkAqTrctrCcDecsn", _sum_trust),
+    (r"자기주식취득결정", "tsstkAqDecsn", _sum_treasury_buy),
+    (r"자기주식처분결정", "tsstkDpDecsn", _sum_treasury_sell),
+    (r"유무상증자결정", "pifricDecsn", _sum_rights_issue),
+    (r"유상증자결정", "piicDecsn", _sum_rights_issue),
+    (r"무상증자결정", "fricDecsn", _sum_bonus_issue),
+    (r"감자결정", "crDecsn", _sum_capital_reduction),
+    (r"전환사채권발행결정", "cvbdIsDecsn", lambda row, code: _sum_cb(row, code, "CB")),
+    (r"신주인수권부사채권발행결정", "bdwtIsDecsn", lambda row, code: _sum_cb(row, code, "BW")),
+    (r"교환사채권발행결정", "exbdIsDecsn", lambda row, code: _sum_cb(row, code, "EB")),
+    (r"대량보유상황보고서", "majorstock", _sum_major_stock),
+]
+
+
+def summarize(item: dict, api_key: str) -> str | None:
+    """탐지된 공시 1건의 내용 요약 (실패 시 None — 알림은 요약 없이 나간다)."""
+    title = re.sub(r"\s+", "", item.get("report_nm") or "")
+    code = (item.get("stock_code") or "").strip()
+    corp_code = item.get("corp_code") or ""
+    rcept_no = item.get("rcept_no") or ""
+    rcept_dt = item.get("rcept_dt") or ""
+
+    try:
+        # 잠정실적 — 원문 표 파싱
+        if re.search(r"영업\(잠정\)실적", title):
+            return _sum_earnings(api_key, rcept_no)
+
+        # 주요사항보고서 계열 — 구조화 API
+        if corp_code and rcept_dt:
+            for pat, api, fn in _RULES:
+                if re.search(pat, title):
+                    row = _pick(_dart_rows(api, api_key, corp_code, rcept_dt), rcept_no)
+                    return fn(row, code) if row else None
+    except Exception as e:
+        print(f"[요약 실패] {rcept_no} {title[:30]}: {type(e).__name__}: {e}")
+    return None

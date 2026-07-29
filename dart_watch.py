@@ -25,6 +25,7 @@ import requests
 
 from common import (DRY_RUN, UA_HEADERS, esc, load_state, load_watch_config,
                     load_watchlist, now_kst, save_state, save_watch_config, tg_send)
+from summarize import _sum_earnings, summarize
 
 DART_LIST_URL = "https://opendart.fss.or.kr/api/list.json"
 DART_VIEWER = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="
@@ -512,6 +513,18 @@ def poll_once(api_key: str, state: dict, cfg: dict) -> None:
             continue  # 첫 가동은 현재 목록을 '본 것'으로만 등록 (알림 홍수 방지)
         msg = classify(it, watch, cfg)
         if msg:
+            summary = summarize(it, api_key)  # 탐지된 건만 내용 요약 (실패 시 None)
+            if summary:
+                head, _, link = msg.rpartition("\n")
+                msg = f"{head}\n{summary}\n{link}"
+            elif re.search(r"영업\(잠정\)실적", re.sub(r"\s+", "", it.get("report_nm") or "")):
+                # 접수 직후엔 원문 파일 등록이 늦다(014) — 알림은 먼저 보내고
+                # 요약은 원문이 올라오는 대로 후속 메시지로 발송
+                state.setdefault("pending_sum", {})[it["rcept_no"]] = {
+                    "tries": 0,
+                    "corp": it.get("corp_name", ""),
+                    "code": (it.get("stock_code") or "").strip(),
+                }
             tg_send(msg)
             alerts += 1
             time.sleep(0.5)
@@ -522,6 +535,36 @@ def poll_once(api_key: str, state: dict, cfg: dict) -> None:
     save_state(STATE_FILE, state)
     print(f"[{now_kst():%H:%M:%S}] 신규 {len(new_items)}건 / 알림 {alerts}건"
           f"{' (첫 가동 시드)' if first_run else ''}")
+
+
+def retry_pending_summaries(api_key: str, state: dict) -> None:
+    """원문 등록 지연으로 미뤄둔 잠정실적 요약을 재시도 (최대 20분)."""
+    pending: dict = state.get("pending_sum", {})
+    if not pending:
+        return
+    changed = False
+    for rcept_no, info in list(pending.items()):
+        info["tries"] = info.get("tries", 0) + 1
+        summary = None
+        try:
+            summary = _sum_earnings(api_key, rcept_no)
+        except Exception:
+            pass
+        if summary:
+            code = info.get("code", "")
+            code_tag = f" ({code})" if code else ""
+            tg_send(f"📈 <b>[실적요약] {esc(info.get('corp', ''))}</b>{code_tag}\n"
+                    f"{summary}\n{DART_VIEWER}{rcept_no}")
+            del pending[rcept_no]
+            changed = True
+        elif info["tries"] >= 20:
+            print(f"[요약 포기] {rcept_no} — 원문 미등록 20회 초과")
+            del pending[rcept_no]
+            changed = True
+        else:
+            changed = True  # tries 카운트 저장
+    if changed:
+        save_state(STATE_FILE, state)
 
 
 def in_window() -> bool:
@@ -555,6 +598,7 @@ def main() -> None:
             break
         try:
             poll_once(api_key, state, cfg)
+            retry_pending_summaries(api_key, state)
         except Exception as e:  # 일시 오류로 잡 전체가 죽지 않게
             print(f"[폴링 오류] {type(e).__name__}: {e}")
         remaining = deadline - time.monotonic()
