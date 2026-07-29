@@ -104,8 +104,30 @@ def _pick(rows: list[dict], rcept_no: str) -> dict | None:
 
 
 # ─── 서식별 요약 ───────────────────────────────────────────────────────────────
+# 서명: fn(row, code, api_key, rcept_no) — 뒤 두 인자는 원문 보조 파싱용
 
-def _sum_treasury_buy(row: dict, code: str) -> str:
+def _issue_targets(api_key: str, rcept_no: str) -> str | None:
+    """유증·CB 등 발행 공시의 대상자 테이블에서 발행대상 추출 (원문 파싱)."""
+    try:
+        text = _doc_text(api_key, rcept_no)
+    except Exception:
+        return None
+    sec = re.search(r"【(?:특정인에\s*대한\s*)?(?:제3자배정\s*)?대상자별[^】]*】(.{0,1200})", text)
+    if not sec:
+        return None
+    seg = sec.group(1)
+    m = re.search(r"비\s*고\s*(.+?)\s+(?:없음|최대주주|특수관계\S*|계열\S*|-\s)", seg)
+    if not m:
+        return None
+    name = m.group(1).strip()
+    if not name or len(name) > 60:
+        return None
+    n_rows = len(re.findall(r"[\d,]{9,}", seg))
+    extra = f" 외 {n_rows - 1}곳" if n_rows > 1 else ""
+    return f"대상: {esc(name)}{extra}"
+
+
+def _sum_treasury_buy(row: dict, code: str, api_key: str = "", rcept_no: str = "") -> str:
     prc = _num(row.get("aqpln_prc_ostk"))
     lines = [f"취득: 보통주 {_shares(row.get('aqpln_stk_ostk'))} ({_eok(prc)})"
              + _vs_cap(prc, code)]
@@ -116,7 +138,7 @@ def _sum_treasury_buy(row: dict, code: str) -> str:
     return "\n".join(lines)
 
 
-def _sum_treasury_sell(row: dict, code: str) -> str:
+def _sum_treasury_sell(row: dict, code: str, api_key: str = "", rcept_no: str = "") -> str:
     prc = _num(row.get("dppln_prc_ostk"))
     lines = [f"처분: 보통주 {_shares(row.get('dppln_stk_ostk'))} ({_eok(prc)})"
              + _vs_cap(prc, code)]
@@ -125,7 +147,7 @@ def _sum_treasury_sell(row: dict, code: str) -> str:
     return "\n".join(lines)
 
 
-def _sum_trust(row: dict, code: str) -> str:
+def _sum_trust(row: dict, code: str, api_key: str = "", rcept_no: str = "") -> str:
     prc = _num(row.get("ctr_prc"))
     out = f"신탁계약금액: {_eok(prc)}" + _vs_cap(prc, code)
     if row.get("ctr_pd_bgd"):
@@ -133,23 +155,33 @@ def _sum_trust(row: dict, code: str) -> str:
     return out
 
 
-def _sum_rights_issue(row: dict, code: str) -> str:
-    cnt = row.get("nstk_ostk_cnt") or row.get("piic_nstk_ostk_cnt")
+def _sum_rights_issue(row: dict, code: str, api_key: str = "", rcept_no: str = "") -> str:
+    ostk = _num(row.get("nstk_ostk_cnt") or row.get("piic_nstk_ostk_cnt"))
+    estk = _num(row.get("nstk_estk_cnt") or row.get("piic_nstk_estk_cnt"))
     total = sum(filter(None, (
         _num(row.get(k)) for k in
         ("fdpp_fclt", "fdpp_bsninh", "fdpp_op", "fdpp_dtrp", "fdpp_ocsa", "fdpp_etc",
          "piic_fdpp_fclt", "piic_fdpp_bsninh", "piic_fdpp_op", "piic_fdpp_dtrp",
          "piic_fdpp_ocsa", "piic_fdpp_etc"))))
     mth = row.get("ic_mthn") or row.get("piic_ic_mthn") or ""
-    out = f"신주: 보통주 {_shares(cnt)}"
+    kinds = []
+    if ostk:
+        kinds.append(f"보통주 {ostk:,.0f}주")
+    if estk:
+        kinds.append(f"기타주식(우선주 등) {estk:,.0f}주")
+    out = "신주: " + (" + ".join(kinds) if kinds else "-")
     if total:
         out += f" · 조달 {_eok(total)}" + _vs_cap(total, code)
     if mth:
         out += f"\n방식: {esc(mth)}"
+    if api_key and rcept_no and "3자" in mth:
+        target = _issue_targets(api_key, rcept_no)
+        if target:
+            out += f"\n{target}"
     return out
 
 
-def _sum_bonus_issue(row: dict, code: str) -> str:
+def _sum_bonus_issue(row: dict, code: str, api_key: str = "", rcept_no: str = "") -> str:
     cnt = row.get("nstk_ostk_cnt") or row.get("fric_nstk_ostk_cnt")
     per = row.get("nstk_ascnt_ps_ostk") or row.get("fric_nstk_ascnt_ps_ostk")
     std = row.get("nstk_asstd") or row.get("fric_nstk_asstd") or ""
@@ -161,7 +193,7 @@ def _sum_bonus_issue(row: dict, code: str) -> str:
     return out
 
 
-def _sum_capital_reduction(row: dict, code: str) -> str:
+def _sum_capital_reduction(row: dict, code: str, api_key: str = "", rcept_no: str = "") -> str:
     rt = row.get("cr_rt_ostk") or row.get("cr_rt")
     out = f"감자: 보통주 {_shares(row.get('crstk_ostk_cnt'))}"
     if rt:
@@ -171,7 +203,7 @@ def _sum_capital_reduction(row: dict, code: str) -> str:
     return out
 
 
-def _sum_cb(row: dict, code: str, kind: str) -> str:
+def _sum_cb(row: dict, code: str, kind: str, api_key: str = "", rcept_no: str = "") -> str:
     fta = _num(row.get("bd_fta"))
     prc = _num(row.get("cv_prc") or row.get("ex_prc") or row.get("act_prc"))
     tm = row.get("bd_tm", "")
@@ -183,10 +215,36 @@ def _sum_cb(row: dict, code: str, kind: str) -> str:
     beg = row.get("cv_rqpd_bgd") or row.get("ex_rqpd_bgd") or row.get("expd_bgd")
     if beg:
         out += f"\n청구가능: {beg}부터"
+    if api_key and rcept_no:
+        target = _issue_targets(api_key, rcept_no)
+        if target:
+            out += f"\n{target}"
     return out
 
 
-def _sum_major_stock(row: dict, code: str) -> str:
+def _sum_cb_doc(api_key: str, rcept_no: str, code: str, kind: str) -> str | None:
+    """CB/BW/EB 발행: 구조화 API가 비어 있을 때 원문에서 직접 추출하는 폴백."""
+    text = _doc_text(api_key, rcept_no)
+    tm = (re.search(r"회차\s*(\d{1,3})\s", text) or [None, None])[1]
+    fta = _num((re.search(r"권면\(전자등록\)총액\s*\(원\)\s*([\d,]+)", text) or [None, None])[1])
+    prc = _num((re.search(r"(?:전환|행사|교환)가액\s*\([^)]*\)\s*([\d,]+)", text) or [None, None])[1])
+    if not fta:
+        return None
+    out = f"{kind} {tm or '-'}회차 · 권면총액 {_eok(fta)}" + _vs_cap(fta, code)
+    if prc:
+        out += f"\n전환/행사가: {prc:,.0f}원 → 전환가능 약 {fta / prc:,.0f}주"
+    beg = re.search(r"(?:전환|행사|교환)청구기간\s*시작일\s*(\d{4}-\d{2}-\d{2})", text)
+    if beg:
+        out += f"\n청구가능: {beg.group(1)}부터"
+    m = re.search(r"비\s*고\s*(.+?)\s+(?:없음|최대주주|특수관계\S*|계열\S*|-\s)",
+                  (re.search(r"【(?:특정인에\s*대한\s*)?대상자별[^】]*】(.{0,1200})", text)
+                   or [None, ""])[1] or "")
+    if m and 0 < len(m.group(1).strip()) <= 60:
+        out += f"\n대상: {esc(m.group(1).strip())}"
+    return out
+
+
+def _sum_major_stock(row: dict, code: str, api_key: str = "", rcept_no: str = "") -> str:
     lines = []
     if row.get("repror"):
         lines.append(f"대표보고: {esc(row['repror'])}")
@@ -245,11 +303,13 @@ def _sum_supply(api_key: str, rcept_no: str, ctx: dict | None = None) -> str | N
     """단일판매ㆍ공급계약체결 — 계약내용·상대·금액·매출대비·기간"""
     text = _doc_text(api_key, rcept_no)
     dot = r"[ㆍ·・]?\s*"
-    what = _clip(re.search(rf"판매{dot}공급계약\s*내용\s*(.+?)\s*2\.\s*계약내역", text))
-    total = _num((re.search(r"계약금액\s*총액\s*\(원\)\s*([\d,\-]+)", text) or [None, None])[1])
+    # 코스닥형: "판매ㆍ공급계약 내용 ..." / 유가형: "체결계약명 ..."
+    what = (_clip(re.search(rf"판매{dot}공급계약\s*내용\s*(.+?)\s*2\.\s*계약내역", text))
+            or _clip(re.search(r"체결계약명\s*(.+?)\s*2\.\s*계약내역", text)))
+    total = _num((re.search(r"계약금액(?:\s*총액)?\s*\(원\)\s*([\d,\-]+)", text) or [None, None])[1])
     sales = _num((re.search(r"최근\s*매출액\s*\(원\)\s*([\d,\-]+)", text) or [None, None])[1])
     ratio = _num((re.search(r"매출액\s*대비\s*\(%\)\s*([\d.,\-]+)", text) or [None, None])[1])
-    party = _clip(re.search(r"\d\.\s*계약상대방\s*(.+?)\s*-?\s*최근\s*매출액", text))
+    party = _clip(re.search(r"\d\.\s*계약상대방?\s*(.+?)\s*(?:-\s*)?(?:최근\s*매출액|회사와의\s*관계)", text))
     region = _clip(re.search(rf"판매{dot}공급지역\s*(.+?)\s*\d\.\s*계약기간", text))
     period = re.search(r"계약기간\s*시작일\s*([\d\-]+)\s*종료일\s*([\d\-]+)", text)
 
@@ -517,9 +577,12 @@ _RULES: list[tuple[str, str | None, object]] = [
     (r"유상증자결정", "piicDecsn", _sum_rights_issue),
     (r"무상증자결정", "fricDecsn", _sum_bonus_issue),
     (r"감자결정", "crDecsn", _sum_capital_reduction),
-    (r"전환사채권발행결정", "cvbdIsDecsn", lambda row, code: _sum_cb(row, code, "CB")),
-    (r"신주인수권부사채권발행결정", "bdwtIsDecsn", lambda row, code: _sum_cb(row, code, "BW")),
-    (r"교환사채권발행결정", "exbdIsDecsn", lambda row, code: _sum_cb(row, code, "EB")),
+    (r"전환사채권발행결정", "cvbdIsDecsn",
+     lambda row, code, ak="", rn="": _sum_cb(row, code, "CB", ak, rn)),
+    (r"신주인수권부사채권발행결정", "bdwtIsDecsn",
+     lambda row, code, ak="", rn="": _sum_cb(row, code, "BW", ak, rn)),
+    (r"교환사채권발행결정", "exbdIsDecsn",
+     lambda row, code, ak="", rn="": _sum_cb(row, code, "EB", ak, rn)),
     (r"대량보유상황보고서", "majorstock", _sum_major_stock),
 ]
 
@@ -541,10 +604,15 @@ def summarize(item: dict, api_key: str) -> str | None:
 
         # 주요사항보고서 계열 — 구조화 API
         if corp_code and rcept_dt:
+            cb_kinds = {"cvbdIsDecsn": "CB", "bdwtIsDecsn": "BW", "exbdIsDecsn": "EB"}
             for pat, api, fn in _RULES:
                 if re.search(pat, title):
                     row = _pick(_dart_rows(api, api_key, corp_code, rcept_dt), rcept_no)
-                    return fn(row, code) if row else None
+                    if row:
+                        return fn(row, code, api_key, rcept_no)
+                    if api in cb_kinds:  # 구조화 API 누락 시 원문 폴백
+                        return _sum_cb_doc(api_key, rcept_no, code, cb_kinds[api])
+                    return None
     except Exception as e:
         print(f"[요약 실패] {rcept_no} {title[:30]}: {type(e).__name__}: {e}")
     return None
