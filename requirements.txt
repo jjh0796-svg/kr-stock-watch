@@ -1,0 +1,3 @@
+requests
+pykrx==1.2.8
+python-dotenv

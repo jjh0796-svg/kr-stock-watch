@@ -1,0 +1,91 @@
+name: Daily Scan
+
+run-name: Daily Scan (${{ inputs.trigger_source || github.event_name }})
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "텔레그램 발송 없이 실행"
+        required: false
+        type: boolean
+        default: false
+      force_rescan:
+        description: "같은 기준일이라도 다시 스캔"
+        required: false
+        type: boolean
+        default: false
+      trigger_source:
+        description: "호출자 라벨"
+        required: false
+        type: string
+        default: "manual"
+  schedule:
+    - cron: "5 10 * * 1-5"   # KST 19:05 본 실행
+    - cron: "10 23 * * 0-4"  # KST 08:10 백업 (당일 데이터가 저녁에 아직 없던 경우 전일 기준 처리)
+
+concurrency:
+  group: daily-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache month key
+        id: cachemonth
+        run: echo "ym=$(date -u +'%Y-%m')" >> $GITHUB_OUTPUT
+
+      - name: Restore Python env cache
+        id: venvcache
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-daily-scan-${{ steps.cachemonth.outputs.ym }}-${{ hashFiles('requirements.txt') }}
+
+      - name: Install dependencies
+        if: steps.venvcache.outputs.cache-hit != 'true'
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -r requirements.txt
+
+      - name: Activate cached env
+        run: echo "$PWD/.venv/bin" >> $GITHUB_PATH
+
+      - name: Restore scan state
+        uses: actions/cache/restore@v4
+        with:
+          path: .state
+          key: scan-state-${{ github.run_id }}
+          restore-keys: |
+            scan-state-
+
+      - name: Run daily scan
+        env:
+          KRX_AUTH_KEY: ${{ secrets.KRX_AUTH_KEY }}
+          KRX_ID: ${{ secrets.KRX_ID }}
+          KRX_PW: ${{ secrets.KRX_PW }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          WATCHLIST: ${{ secrets.WATCHLIST }}
+          DRY_RUN: ${{ inputs.dry_run == true && '1' || '' }}
+          FORCE_RESCAN: ${{ inputs.force_rescan == true && '1' || '' }}
+        run: python daily_scan.py
+
+      - name: Save scan state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .state
+          key: scan-state-${{ github.run_id }}
