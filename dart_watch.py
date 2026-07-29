@@ -162,6 +162,7 @@ HELP_TEXT = (
     "/유형 7 끄기 — 7번 서식 알림 중단 (여러 개: /유형 7 8 9 끄기)\n"
     "/유형 전환가액의조정 켜기 — 이름으로도 가능\n"
     "/전체 31 켜기 — 해당 서식을 관심종목 무관 <b>전 종목</b> 구독 (/전체 로 확인)\n"
+    "/보고자 추가 이름 — 5% 보고 감시 보고자 확대 (기본: 국민연금)\n"
     "/키워드 추가 단어 — 서식 목록에 없는 제목 키워드 직접 추가\n"
     "/키워드 삭제 단어\n\n"
     "변경은 폴링 주기(약 1분) 안에 적용되고, 장 마감 스캔에도 같은 목록이 쓰입니다."
@@ -296,6 +297,24 @@ def handle_command(text: str, cfg: dict) -> str | None:
                     + "\n".join(f" • {s}" for s in subs)
                     + "\n해제: /전체 이름(또는 번호) 끄기")
         return "🌐 전 종목 구독 중인 서식 없음\n예: /전체 31 켜기 (번호는 /유형 참고)"
+
+    if cmd in ("/보고자", "/filer"):
+        extra = cfg.setdefault("filers_extra", [])
+        if len(parts) >= 3 and parts[1] in ("추가", "삭제"):
+            word = " ".join(parts[2:]).strip()
+            if parts[1] == "추가":
+                if word not in extra:
+                    extra.append(word)
+                return f"➕ 보고자 키워드 '{esc(word)}' 추가됨 (5% 보고 전 종목 감시 대상)"
+            if word in extra:
+                extra.remove(word)
+                return f"🗑 보고자 키워드 '{esc(word)}' 삭제됨"
+            return f"'{esc(word)}' 는 추가된 보고자가 아닙니다 (기본 {', '.join(FILER_KEYWORDS)}는 고정)"
+        return ("🏛 <b>5% 보고 감시 보고자</b>\n"
+                f" 기본: {', '.join(FILER_KEYWORDS)}\n"
+                f" 추가: {', '.join(esc(k) for k in extra) if extra else '(없음)'}\n"
+                "관심종목의 5% 보고는 보고자와 무관하게 전부 알립니다.\n"
+                "형식: /보고자 추가 이름 · /보고자 삭제 이름")
 
     if cmd in ("/키워드", "/keyword"):
         if len(parts) >= 3 and parts[1] in ("추가", "삭제"):
@@ -433,14 +452,18 @@ def classify(item: dict, watch: dict[str, str], cfg: dict) -> str | None:
     mkt = MARKET_LABEL.get(item.get("corp_cls", ""), "")
     corp_disp = f"({mkt}){esc(corp)}" if mkt else esc(corp)
 
-    # 대량보유 보고 (전 종목, 보고자 필터)
+    in_watch = bool(code) and code in watch
+
+    # 대량보유(5%) 보고 — 관심종목은 보고자 무관 전부,
+    # 그 외 종목은 보고자 키워드(국민연금 + /보고자 추가분)에 걸릴 때만
     if LARGE_HOLDING not in off:
         pattern, emoji = TYPES_BY_NAME[LARGE_HOLDING]
-        if pattern.search(compact) and any(k in filer for k in FILER_KEYWORDS):
-            return (f"{emoji} <b>[5% 보고] {corp_disp}</b>{f' ({code})' if code else ''}\n"
-                    f"{esc(title)}\n보고자: {esc(filer)}\n{link}")
-
-    in_watch = bool(code) and code in watch
+        if pattern.search(compact):
+            filers = FILER_KEYWORDS + cfg.get("filers_extra", [])
+            if in_watch or any(k in filer for k in filers):
+                return (f"{emoji} <b>[5% 보고] {corp_disp}</b>{f' ({code})' if code else ''}\n"
+                        f"{esc(title)}\n보고자: {esc(filer)}\n{link}")
+            return None  # 5% 보고이긴 하나 필터 밖 — 다른 서식으로 오분류 방지
 
     # 전 종목 구독 서식 (관심종목 무관)
     if not in_watch:

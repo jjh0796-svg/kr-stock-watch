@@ -118,7 +118,7 @@ def save_state(name: str, data) -> None:
 
 CONFIG_FILE = "watch_config.json"
 DEFAULT_CONFIG = {"add": {}, "remove": [], "keywords_extra": [], "types_off": [],
-                  "types_all": [], "tg_offset": 0}
+                  "types_all": [], "filers_extra": [], "tg_offset": 0}
 
 
 def load_watch_config() -> dict:
