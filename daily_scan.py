@@ -281,8 +281,11 @@ def scan_credit() -> str | None:
     total = [float(x["TMPV2"]) for x in rows]
     latest, date = total[0], rows[0]["TMPV1"]
     jo = lambda v: f"{v / 1000:.1f}조"
-    d5 = (latest / total[5] - 1) * 100 if len(total) > 5 and total[5] else 0.0
-    d20 = (latest / total[20] - 1) * 100 if len(total) > 20 and total[20] else 0.0
+
+    def delta(n: int) -> float:
+        return (latest / total[n] - 1) * 100 if len(total) > n and total[n] else 0.0
+
+    d1, d5, d20 = delta(1), delta(5), delta(20)
     yr_max = max(total[:250]) if len(total) >= 2 else latest
     flags = []
     if latest >= yr_max:
@@ -292,7 +295,7 @@ def scan_credit() -> str | None:
     flag_txt = " " + " ".join(flags) if flags else ""
     return (f" 총 {jo(latest)} (유가 {jo(float(rows[0]['TMPV3']))} · "
             f"코스닥 {jo(float(rows[0]['TMPV4']))})\n"
-            f" 5일 {d5:+.1f}% · 20일 {d20:+.1f}%{flag_txt}\n"
+            f" 전일 {d1:+.2f}% · 5일 {d5:+.2f}% · 20일 {d20:+.2f}%{flag_txt}\n"
             f" 기준일 {date[4:6]}/{date[6:]}")
 
 

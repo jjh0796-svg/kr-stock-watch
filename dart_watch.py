@@ -1,6 +1,6 @@
 # ==========================================
 # 🚨 DART 주요공시 1분 감시 (아이디어 1·2·3)
-#   1) 관심종목 주요공시 키워드 알림
+#   1) 관심종목 주요공시 알림 (DART 정식 서식명 기준, 개별 켜기/끄기)
 #   2) 관심종목 CB 리픽싱·전환청구 등 오버행 경고
 #   3) 국민연금 등 주요 보고자의 5% 대량보유 공시
 #
@@ -11,7 +11,7 @@
 #
 # 텔레그램 명령 (봇 대화방에서):
 #   /추가 005930 삼성전자   /삭제 005930   /목록
-#   /유형                  /유형 실적 끄기
+#   /유형                  /유형 7 끄기   /유형 전환가액의조정 켜기
 #   /키워드 추가 무상소각    /키워드 삭제 무상소각
 #
 # DART 호출량: 분당 1~3건 × 하루 약 12시간 ≈ 800~1,000건/일
@@ -38,39 +38,76 @@ SEEN_CAP = 8000
 WINDOW_START = (7, 20)
 WINDOW_END = (19, 50)
 
-# 1) 주요공시 키워드 — 유형(그룹)별로 텔레그램 /유형 명령으로 켜고 끌 수 있다
-KEYWORD_GROUPS: dict[str, str] = {
-    "자금조달": r"유상증자|무상증자|전환사채|신주인수권부사채|교환사채",
-    "주주환원": r"자기주식|소각|배당",
-    "지배구조": r"감자|주식병합|주식분할|회사분할|분할합병|합병|주식교환|주식이전|공개매수"
-              r"|영업양수|영업양도|최대주주변경|경영권|타법인주식및출자증권취득"
-              r"|타법인주식및출자증권처분|유형자산취득|유형자산양수|자산재평가",
-    "계약수주": r"공급계약|수주",
-    "리스크": r"소송|회생절차|파산|해산사유|매매거래정지|상장폐지|관리종목|불성실공시"
-            r"|횡령|배임|감사의견",
-    "실적": r"영업실적|잠정.{0,3}실적|매출액또는손익",
-    "시장조치": r"조회공시|풍문또는보도",
-}
-SPECIAL_GROUPS = ["오버행", "5%보고"]  # 키워드 그룹 외 특수 유형 (역시 /유형으로 토글)
-
-# 2) 오버행(물량 부담) 신호 (관심종목 대상)
-OVERHANG_RE = re.compile(
-    r"전환가액[의]?조정|전환청구권[의]?행사|신주인수권[의]?행사|행사가액[의]?조정"
-    r"|교환가액[의]?조정|교환청구권|조기상환청구"
-)
+# ─── 감시 대상 공시 (DART/KIND 정식 서식명 기준) ──────────────────────────────
+# (서식명, 제목 매칭 정규식, 이모지) — 제목은 공백 제거 후 매칭.
+# "주요사항보고서(유상증자결정)", "[기재정정]유상증자결정"처럼 서식명이
+# 제목 안에 포함되는 구조라 부분 매칭으로 잡는다.
+# /유형 명령으로 번호·이름 단위 켜기/끄기.
+DISCLOSURE_TYPES: list[tuple[str, str, str]] = [
+    # 자금조달 (신주·사채 발행)
+    ("유무상증자결정", r"유무상증자결정", "🚨"),
+    ("유상증자결정", r"유상증자결정", "🚨"),
+    ("무상증자결정", r"무상증자결정", "🚨"),
+    ("전환사채권발행결정", r"전환사채권발행결정", "🚨"),
+    ("신주인수권부사채권발행결정", r"신주인수권부사채권발행결정", "🚨"),
+    ("교환사채권발행결정", r"교환사채권발행결정", "🚨"),
+    # 오버행 (기발행 물량의 주식화)
+    ("전환가액의조정", r"전환가액의조정", "⚠️"),
+    ("전환청구권행사", r"전환청구권행사", "⚠️"),
+    ("신주인수권행사", r"신주인수권행사", "⚠️"),
+    ("교환청구권행사", r"교환청구권행사", "⚠️"),
+    ("사채조기상환청구", r"조기상환청구", "⚠️"),
+    # 주주환원
+    ("자기주식취득결정", r"자기주식취득결정", "💰"),
+    ("자기주식처분결정", r"자기주식처분결정", "💰"),
+    ("자기주식소각결정", r"자기주식소각결정|주식소각결정", "💰"),
+    ("자기주식취득신탁계약체결결정", r"자기주식취득신탁계약체결결정", "💰"),
+    ("자기주식취득신탁계약해지결정", r"자기주식취득신탁계약해지결정", "💰"),
+    ("현금ㆍ현물배당결정", r"현금ㆍ현물배당결정|현금·현물배당결정|현금배당결정", "💰"),
+    ("주식배당결정", r"주식배당결정", "💰"),
+    # 자본·조직 변경
+    ("감자결정", r"감자결정", "🚨"),
+    ("주식분할결정", r"주식분할결정", "🔔"),
+    ("주식병합결정", r"주식병합결정", "🔔"),
+    ("회사합병결정", r"회사합병결정", "🚨"),
+    ("회사분할결정", r"회사분할(합병)?결정", "🚨"),
+    ("주식의포괄적교환ㆍ이전결정", r"포괄적교환", "🚨"),
+    ("영업양수ㆍ양도결정", r"영업양[수도]결정", "🚨"),
+    ("유형자산양수ㆍ양도결정", r"유형자산(양[수도]|취득|처분)결정", "🚨"),
+    ("타법인주식및출자증권취득결정", r"타법인주식및출자증권취득결정", "🚨"),
+    ("타법인주식및출자증권처분결정", r"타법인주식및출자증권처분결정", "🚨"),
+    ("공개매수신고서", r"공개매수", "🚨"),
+    ("최대주주변경", r"최대주주변경", "🚨"),
+    # 계약·실적
+    ("단일판매ㆍ공급계약체결", r"단일판매|공급계약체결", "📝"),
+    ("영업(잠정)실적(공정공시)", r"영업\(잠정\)실적", "📈"),
+    ("영업실적등에대한전망(공정공시)", r"영업실적등에대한전망", "📈"),
+    ("매출액또는손익구조30%이상변동", r"매출액또는손익구조", "📈"),
+    # 리스크
+    ("소송등의제기ㆍ판결", r"소송등의(제기|판결)", "⚖️"),
+    ("회생절차개시신청", r"회생절차", "⚖️"),
+    ("파산신청", r"파산신청", "⚖️"),
+    ("해산사유발생", r"해산사유발생", "⚖️"),
+    ("매매거래정지", r"매매거래정지", "⚖️"),
+    ("관리종목지정", r"관리종목", "⚖️"),
+    ("상장폐지관련", r"상장폐지", "⚖️"),
+    ("불성실공시법인지정", r"불성실공시", "⚖️"),
+    ("횡령ㆍ배임혐의발생", r"횡령|배임", "⚖️"),
+    ("감사보고서제출", r"감사보고서제출|감사의견", "⚖️"),
+    # 시장 조치·해명
+    ("조회공시요구", r"조회공시요구", "🔔"),
+    ("풍문또는보도에대한해명", r"풍문또는보도", "🔔"),
+    # 지분 공시 (전 종목 — 보고자 키워드 필터)
+    ("주식등의대량보유상황보고서", r"대량보유상황보고서", "🏛"),
+]
+TYPES_BY_NAME = {name: (re.compile(pat), emoji) for name, pat, emoji in DISCLOSURE_TYPES}
+LARGE_HOLDING = "주식등의대량보유상황보고서"
 
 # 3) 대량보유 보고자 키워드 (전 종목 대상, 쉼표로 추가 가능)
 #    환경변수가 빈 값으로 넘어와도 기본값이 살아야 한다 (Actions vars 미설정 시)
 FILER_KEYWORDS = [k.strip() for k in (
     os.environ.get("FILER_KEYWORDS") or "국민연금"
 ).split(",") if k.strip()]
-
-
-def build_major_re(cfg: dict) -> re.Pattern | None:
-    off = set(cfg.get("groups_off", []))
-    parts = [pat for g, pat in KEYWORD_GROUPS.items() if g not in off]
-    parts += [re.escape(k) for k in cfg.get("keywords_extra", [])]
-    return re.compile("|".join(parts)) if parts else None
 
 
 def merged_watchlist(cfg: dict) -> dict[str, str]:
@@ -88,12 +125,17 @@ HELP_TEXT = (
     "/추가 005930 삼성전자 — 관심종목 추가\n"
     "/삭제 005930 — 관심종목 제외\n"
     "/목록 — 현재 관심종목·설정 보기\n"
-    "/유형 — 공시 유형별 켜짐/꺼짐 보기\n"
-    "/유형 실적 끄기 — 해당 유형 알림 중단 (켜기로 복원)\n"
-    "/키워드 추가 단어 — 감시 키워드 직접 추가\n"
+    "/유형 — 감시 중인 공시 서식 목록(번호) 보기\n"
+    "/유형 7 끄기 — 7번 서식 알림 중단 (여러 개: /유형 7 8 9 끄기)\n"
+    "/유형 전환가액의조정 켜기 — 이름으로도 가능\n"
+    "/키워드 추가 단어 — 서식 목록에 없는 제목 키워드 직접 추가\n"
     "/키워드 삭제 단어\n\n"
     "변경은 폴링 주기(약 1분) 안에 적용되고, 장 마감 스캔에도 같은 목록이 쓰입니다."
 )
+
+
+def types_off(cfg: dict) -> set[str]:
+    return set(cfg.get("types_off", []))
 
 
 def handle_command(text: str, cfg: dict) -> str | None:
@@ -122,33 +164,39 @@ def handle_command(text: str, cfg: dict) -> str | None:
     if cmd in ("/목록", "/list"):
         watch = merged_watchlist(cfg)
         lines = [f" • {esc(n)} ({c})" for c, n in sorted(watch.items(), key=lambda x: x[1])]
-        off = cfg.get("groups_off", [])
+        off = sorted(types_off(cfg))
         extra = cfg.get("keywords_extra", [])
         msg = f"📋 <b>관심종목 {len(watch)}개</b>\n" + ("\n".join(lines) if lines else " (없음)")
         if off:
-            msg += f"\n\n🚫 꺼진 유형: {', '.join(off)}"
+            msg += f"\n\n🚫 꺼진 서식({len(off)}): " + ", ".join(off)
         if extra:
             msg += f"\n➕ 추가 키워드: {', '.join(esc(k) for k in extra)}"
         return msg
 
     if cmd in ("/유형", "/types"):
-        all_groups = list(KEYWORD_GROUPS) + SPECIAL_GROUPS
-        if len(parts) >= 3 and parts[2] in ("끄기", "켜기", "off", "on"):
-            g = parts[1]
-            if g not in all_groups:
-                return f"없는 유형입니다. 가능: {', '.join(all_groups)}"
-            off = set(cfg.get("groups_off", []))
-            if parts[2] in ("끄기", "off"):
-                off.add(g)
-                verb = "껐습니다"
-            else:
-                off.discard(g)
-                verb = "켰습니다"
-            cfg["groups_off"] = sorted(off)
-            return f"🔧 [{g}] 알림을 {verb}"
-        off = set(cfg.get("groups_off", []))
-        lines = [f" {'🚫' if g in off else '✅'} {g}" for g in all_groups]
-        return ("🔧 <b>공시 유형</b> (끄기: /유형 이름 끄기)\n" + "\n".join(lines))
+        names = [name for name, _, _ in DISCLOSURE_TYPES]
+        # 토글: /유형 7 끄기 · /유형 7 8 9 켜기 · /유형 전환가액의조정 끄기
+        if len(parts) >= 3 and parts[-1] in ("끄기", "켜기", "off", "on"):
+            turn_off = parts[-1] in ("끄기", "off")
+            targets: list[str] = []
+            for tok in parts[1:-1]:
+                if tok.isdigit() and 1 <= int(tok) <= len(names):
+                    targets.append(names[int(tok) - 1])
+                elif tok in TYPES_BY_NAME:
+                    targets.append(tok)
+                else:
+                    return f"'{esc(tok)}' 은 목록에 없습니다. /유형 으로 번호를 확인하세요."
+            off = types_off(cfg)
+            for t in targets:
+                (off.add if turn_off else off.discard)(t)
+            cfg["types_off"] = sorted(off)
+            verb = "껐습니다" if turn_off else "켰습니다"
+            return f"🔧 {', '.join(targets)} 알림을 {verb} (꺼진 서식 {len(off)}개)"
+        off = types_off(cfg)
+        lines = [f" {'🚫' if name in off else '✅'} {i:>2} {emoji} {name}"
+                 for i, (name, _, emoji) in enumerate(DISCLOSURE_TYPES, 1)]
+        return ("🔧 <b>감시 공시 서식</b> (DART 서식명 기준)\n"
+                "끄기: /유형 번호 끄기 · 켜기: /유형 번호 켜기\n" + "\n".join(lines))
 
     if cmd in ("/키워드", "/keyword"):
         if len(parts) >= 3 and parts[1] in ("추가", "삭제"):
@@ -239,10 +287,9 @@ def fetch_today_list(api_key: str, first_run: bool, seen: dict) -> list[dict]:
     return items
 
 
-def classify(item: dict, watch: dict[str, str], cfg: dict,
-             major_re: re.Pattern | None) -> str | None:
+def classify(item: dict, watch: dict[str, str], cfg: dict) -> str | None:
     """공시 1건을 분류해 알림 메시지를 만들거나 None(무시)."""
-    off = set(cfg.get("groups_off", []))
+    off = types_off(cfg)
     code = (item.get("stock_code") or "").strip()
     corp = item.get("corp_name") or ""
     title = item.get("report_nm") or ""
@@ -251,33 +298,38 @@ def classify(item: dict, watch: dict[str, str], cfg: dict,
     link = DART_VIEWER + rcept_no
     compact = re.sub(r"\s+", "", title)
 
-    # 3) 대량보유 보고 (전 종목)
-    if ("5%보고" not in off and "대량보유상황보고서" in compact
-            and any(k in filer for k in FILER_KEYWORDS)):
-        return (f"🏛 <b>[5% 보고] {esc(corp)}</b>{f' ({code})' if code else ''}\n"
-                f"{esc(title)}\n보고자: {esc(filer)}\n{link}")
+    # 대량보유 보고 (전 종목, 보고자 필터)
+    if LARGE_HOLDING not in off:
+        pattern, emoji = TYPES_BY_NAME[LARGE_HOLDING]
+        if pattern.search(compact) and any(k in filer for k in FILER_KEYWORDS):
+            return (f"{emoji} <b>[5% 보고] {esc(corp)}</b>{f' ({code})' if code else ''}\n"
+                    f"{esc(title)}\n보고자: {esc(filer)}\n{link}")
 
     if not code or code not in watch:
         return None
 
-    # 2) 오버행 경고 (관심종목)
-    if "오버행" not in off and OVERHANG_RE.search(compact):
-        return (f"⚠️ <b>[오버행 주의] {esc(corp)}</b> ({code})\n"
-                f"{esc(title)}\n{link}")
+    # 관심종목: 서식 목록에서 첫 매칭
+    for name, _, _ in DISCLOSURE_TYPES:
+        if name == LARGE_HOLDING or name in off:
+            continue
+        pattern, emoji = TYPES_BY_NAME[name]
+        if pattern.search(compact):
+            return (f"{emoji} <b>[{name}] {esc(corp)}</b> ({code})\n"
+                    f"{esc(title)}"
+                    f"{f'{chr(10)}제출: {esc(filer)}' if filer and filer != corp else ''}\n"
+                    f"{link}")
 
-    # 1) 주요공시 (관심종목)
-    if major_re and major_re.search(compact):
-        return (f"🚨 <b>[주요공시] {esc(corp)}</b> ({code})\n"
-                f"{esc(title)}"
-                f"{f'{chr(10)}제출: {esc(filer)}' if filer and filer != corp else ''}\n"
-                f"{link}")
+    # 사용자 추가 키워드
+    for word in cfg.get("keywords_extra", []):
+        if word and word in compact:
+            return (f"🔍 <b>[키워드: {esc(word)}] {esc(corp)}</b> ({code})\n"
+                    f"{esc(title)}\n{link}")
 
     return None
 
 
 def poll_once(api_key: str, state: dict, cfg: dict) -> None:
     watch = merged_watchlist(cfg)
-    major_re = build_major_re(cfg)
     seen: dict = state.setdefault("seen", {})
     first_run = not seen
     items = fetch_today_list(api_key, first_run, seen)
@@ -290,7 +342,7 @@ def poll_once(api_key: str, state: dict, cfg: dict) -> None:
         seen[it["rcept_no"]] = it.get("rcept_dt", "")
         if first_run:
             continue  # 첫 가동은 현재 목록을 '본 것'으로만 등록 (알림 홍수 방지)
-        msg = classify(it, watch, cfg, major_re)
+        msg = classify(it, watch, cfg)
         if msg:
             tg_send(msg)
             alerts += 1
@@ -317,7 +369,8 @@ def main() -> None:
     if not api_key:
         raise SystemExit("DART_API_KEY 환경변수가 필요합니다")
     cfg = load_watch_config()
-    print(f"관심종목 {len(merged_watchlist(cfg))}개 | 보고자 키워드 {FILER_KEYWORDS} "
+    print(f"관심종목 {len(merged_watchlist(cfg))}개 | 서식 {len(DISCLOSURE_TYPES)}종"
+          f"(꺼짐 {len(types_off(cfg))}) | 보고자 키워드 {FILER_KEYWORDS} "
           f"| 총 {POLL_TOTAL_SECONDS}s, 간격 {POLL_INTERVAL}s")
 
     state = load_state(STATE_FILE, {})

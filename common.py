@@ -117,7 +117,7 @@ def save_state(name: str, data) -> None:
 # ─── 동적 설정 (텔레그램 명령으로 갱신, dart-watch의 상태 캐시에 저장) ────────
 
 CONFIG_FILE = "watch_config.json"
-DEFAULT_CONFIG = {"add": {}, "remove": [], "keywords_extra": [], "groups_off": [], "tg_offset": 0}
+DEFAULT_CONFIG = {"add": {}, "remove": [], "keywords_extra": [], "types_off": [], "tg_offset": 0}
 
 
 def load_watch_config() -> dict:
