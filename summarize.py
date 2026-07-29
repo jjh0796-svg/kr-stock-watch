@@ -9,6 +9,7 @@
 import io
 import re
 import zipfile
+from datetime import datetime, timedelta
 
 import requests
 
@@ -77,10 +78,15 @@ def _vs_cap(won: float | None, code: str) -> str:
 # ─── DART 구조화 API 공통 ──────────────────────────────────────────────────────
 
 def _dart_rows(api: str, api_key: str, corp_code: str, rcept_dt: str) -> list[dict]:
+    # [기재정정]은 원 결정일 기준으로 등록돼 있어 조회 범위를 90일 넓게 잡는다
+    try:
+        bgn = (datetime.strptime(rcept_dt, "%Y%m%d") - timedelta(days=90)).strftime("%Y%m%d")
+    except ValueError:
+        bgn = rcept_dt
     try:
         r = requests.get(f"{DART_BASE}/{api}.json",
                          params={"crtfc_key": api_key, "corp_code": corp_code,
-                                 "bgn_de": rcept_dt, "end_de": rcept_dt},
+                                 "bgn_de": bgn, "end_de": rcept_dt},
                          headers=UA_HEADERS, timeout=15)
         d = r.json()
         if d.get("status") != "000":
@@ -348,6 +354,56 @@ def _qlabel(key: str) -> str:
     return f"{key[:4]}.{int(key[4:6]) // 3}Q"
 
 
+def _sum_repricing(api_key: str, rcept_no: str, ctx: dict | None = None) -> str | None:
+    """전환가액(행사가액·교환가액)의조정 — 조정 전→후, 전환가능주식수, 사유"""
+    text = _doc_text(api_key, rcept_no)
+    m = re.search(r"조정전\s*(전환|행사|교환)가액\s*\(원\)\s*조정후\s*\1가액\s*\(원\)"
+                  r"\s*(\d{1,3})\s+(\S+)\s+([\d,]+)\s+([\d,]+)", text)
+    lines = []
+    if m:
+        kind_label = {"전환": "CB 전환가", "행사": "BW 행사가", "교환": "EB 교환가"}[m.group(1)]
+        before, after = _num(m.group(4)), _num(m.group(5))
+        if before and after:
+            lines.append(f"{m.group(2)}회차 · {kind_label} {before:,.0f}원 → {after:,.0f}원"
+                         f" ({(after / before - 1) * 100:+.1f}%)")
+    sec = re.search(r"주식수\s*변동(.+?)조정사유", text)
+    if sec:
+        nums = [n for n in (_num(x) for x in re.findall(r"[\d,]{4,}", sec.group(1))) if n]
+        if len(nums) >= 2:
+            face = max(nums)                                  # 미전환 권면총액(원)
+            shares = [n for n in nums if n != face]
+            after_shares = shares[-1] if shares else None
+            if face >= 1e7 and after_shares:
+                code = (ctx or {}).get("code", "")
+                lines.append(f"미전환 권면 {_eok(face)}{_vs_cap(face, code) if code else ''}"
+                             f" → 조정 후 전환가능 {after_shares:,.0f}주")
+    reason = _clip(re.search(r"조정사유\s*(.+?)\s*\d\.\s*조정근거", text))
+    if reason:
+        lines.append(f"사유: {reason}")
+    return "\n".join(lines) if lines else None
+
+
+def _sum_asset(api_key: str, rcept_no: str, ctx: dict | None = None) -> str | None:
+    """유형자산 양수ㆍ양도결정 — 자산·금액·자산총액대비·목적"""
+    text = _doc_text(api_key, rcept_no)
+    verb = "양수" if "양수" in text[:2000] else "양도"
+    asset = _clip(re.search(r"자산구분\s*(.+?)\s*(?:2\.|양[수도]내역|자산명)", text))
+    amount = _num((re.search(rf"{verb}금액\s*\(원\)?\s*([\d,]+)", text) or [None, None])[1])
+    ratio = _num((re.search(r"자산총액대비\s*\(?%?\)?\s*([\d.,]+)", text) or [None, None])[1])
+    purpose = _clip(re.search(rf"{verb}목적\s*(.+?)\s*\d\.\s*", text))
+    lines = []
+    if amount:
+        line = f"{verb}금액: {_eok(amount)}"
+        if ratio is not None:
+            line += f" (자산총액대비 {ratio:.1f}%)"
+        lines.append(line)
+    if asset:
+        lines.append(f"자산: {asset}")
+    if purpose:
+        lines.append(f"목적: {purpose}")
+    return "\n".join(lines) if lines else None
+
+
 def _sum_earnings(api_key: str, rcept_no: str, ctx: dict | None = None) -> str | None:
     text = _doc_text(api_key, rcept_no)
     unit = _detect_unit_won(text)
@@ -423,6 +479,8 @@ DOC_SUMMARIZERS: dict[str, tuple[object, str, str]] = {
     "earnings": (_sum_earnings, "실적요약", "📈"),
     "supply": (_sum_supply, "계약요약", "📝"),
     "ir": (_sum_ir, "IR요약", "🔔"),
+    "repricing": (_sum_repricing, "리픽싱요약", "⚠️"),
+    "asset": (_sum_asset, "자산양수도요약", "🚨"),
 }
 
 
@@ -435,7 +493,19 @@ def doc_kind(title: str) -> str | None:
         return "supply"
     if re.search(r"기업설명회", t):
         return "ir"
+    if re.search(r"가액의?조정", t):
+        return "repricing"
+    if re.search(r"유형자산(양[수도]|취득|처분)", t):
+        return "asset"
     return None
+
+
+def summarizable(title: str) -> bool:
+    """요약 수단이 있는 서식인지 — 지연 재시도 큐 대상 판별용."""
+    if doc_kind(title):
+        return True
+    t = re.sub(r"\s+", "", title or "")
+    return any(re.search(pat, t) for pat, _, _ in _RULES)
 
 # (제목 정규식, DART API 이름, 요약 함수) — None API는 원문 파싱 계열
 _RULES: list[tuple[str, str | None, object]] = [

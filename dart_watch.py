@@ -25,7 +25,7 @@ import requests
 
 from common import (DRY_RUN, UA_HEADERS, esc, load_state, load_watch_config,
                     load_watchlist, now_kst, save_state, save_watch_config, tg_send)
-from summarize import DOC_SUMMARIZERS, doc_kind, summarize
+from summarize import summarizable, summarize
 
 DART_LIST_URL = "https://opendart.fss.or.kr/api/list.json"
 DART_VIEWER = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="
@@ -518,14 +518,16 @@ def poll_once(api_key: str, state: dict, cfg: dict) -> None:
             if summary:
                 head, _, link = msg.rpartition("\n")
                 msg = f"{head}\n{summary}\n{link}"
-            elif doc_kind(it.get("report_nm")):
-                # 접수 직후엔 원문 파일 등록이 늦다(014) — 알림은 먼저 보내고
-                # 요약은 원문이 올라오는 대로 후속 메시지로 발송
+            elif summarizable(it.get("report_nm") or ""):
+                # 접수 직후엔 원문 파일·구조화 API 등록이 늦을 수 있다 — 알림은
+                # 먼저 보내고, 요약은 데이터가 올라오는 대로 후속 메시지로 발송
                 state.setdefault("pending_sum", {})[it["rcept_no"]] = {
                     "tries": 0,
-                    "kind": doc_kind(it.get("report_nm")),
                     "corp": it.get("corp_name", ""),
                     "code": (it.get("stock_code") or "").strip(),
+                    "corp_code": it.get("corp_code", ""),
+                    "rcept_dt": it.get("rcept_dt", ""),
+                    "title": it.get("report_nm", ""),
                 }
             tg_send(msg)
             alerts += 1
@@ -540,27 +542,32 @@ def poll_once(api_key: str, state: dict, cfg: dict) -> None:
 
 
 def retry_pending_summaries(api_key: str, state: dict) -> None:
-    """원문 등록 지연으로 미뤄둔 요약(실적·계약·IR)을 재시도 (최대 20분)."""
+    """데이터 등록 지연으로 미뤄둔 요약을 재시도.
+    처음 10분은 매 사이클, 이후엔 5사이클마다, 약 2.5시간까지 (원문 등록이
+    2시간 넘게 걸린 사례 확인됨)."""
     pending: dict = state.get("pending_sum", {})
     if not pending:
         return
     for rcept_no, info in list(pending.items()):
+        if "title" not in info:      # 구버전 큐 항목은 정리
+            del pending[rcept_no]
+            continue
         info["tries"] = info.get("tries", 0) + 1
-        fn, label, emoji = DOC_SUMMARIZERS.get(
-            info.get("kind", "earnings"), DOC_SUMMARIZERS["earnings"])
-        summary = None
-        try:
-            summary = fn(api_key, rcept_no, {"code": info.get("code", "")})
-        except Exception:
-            pass
+        tries = info["tries"]
+        if tries > 10 and tries % 5 != 0:
+            continue
+        item = {"rcept_no": rcept_no, "report_nm": info.get("title", ""),
+                "stock_code": info.get("code", ""), "corp_code": info.get("corp_code", ""),
+                "corp_name": info.get("corp", ""), "rcept_dt": info.get("rcept_dt", "")}
+        summary = summarize(item, api_key)
         if summary:
             code = info.get("code", "")
             code_tag = f" ({code})" if code else ""
-            tg_send(f"{emoji} <b>[{label}] {esc(info.get('corp', ''))}</b>{code_tag}\n"
-                    f"{summary}\n{DART_VIEWER}{rcept_no}")
+            tg_send(f"🧾 <b>[요약] {esc(info.get('corp', ''))}</b>{code_tag}\n"
+                    f"{esc(info.get('title', ''))}\n{summary}\n{DART_VIEWER}{rcept_no}")
             del pending[rcept_no]
-        elif info["tries"] >= 20:
-            print(f"[요약 포기] {rcept_no} — 원문 미등록 20회 초과")
+        elif tries >= 150:
+            print(f"[요약 포기] {rcept_no} — 데이터 미등록 (약 2.5시간 경과)")
             del pending[rcept_no]
     save_state(STATE_FILE, state)
 
