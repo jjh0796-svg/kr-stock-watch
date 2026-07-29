@@ -102,6 +102,7 @@ DISCLOSURE_TYPES: list[tuple[str, str, str]] = [
 ]
 TYPES_BY_NAME = {name: (re.compile(pat), emoji) for name, pat, emoji in DISCLOSURE_TYPES}
 LARGE_HOLDING = "주식등의대량보유상황보고서"
+MARKET_LABEL = {"Y": "코스피", "K": "코스닥", "N": "코넥스"}  # DART corp_cls
 
 # 3) 대량보유 보고자 키워드 (전 종목 대상, 쉼표로 추가 가능)
 #    환경변수가 빈 값으로 넘어와도 기본값이 살아야 한다 (Actions vars 미설정 시)
@@ -160,6 +161,7 @@ HELP_TEXT = (
     "/유형 — 감시 중인 공시 서식 목록(번호) 보기\n"
     "/유형 7 끄기 — 7번 서식 알림 중단 (여러 개: /유형 7 8 9 끄기)\n"
     "/유형 전환가액의조정 켜기 — 이름으로도 가능\n"
+    "/전체 31 켜기 — 해당 서식을 관심종목 무관 <b>전 종목</b> 구독 (/전체 로 확인)\n"
     "/키워드 추가 단어 — 서식 목록에 없는 제목 키워드 직접 추가\n"
     "/키워드 삭제 단어\n\n"
     "변경은 폴링 주기(약 1분) 안에 적용되고, 장 마감 스캔에도 같은 목록이 쓰입니다."
@@ -235,6 +237,9 @@ def handle_command(text: str, cfg: dict) -> str | None:
         msg = f"📋 <b>관심종목 {len(watch)}개</b>\n" + ("\n".join(lines) if lines else " (없음)")
         if off:
             msg += f"\n\n🚫 꺼진 서식({len(off)}): " + ", ".join(off)
+        subs = cfg.get("types_all", [])
+        if subs:
+            msg += f"\n🌐 전 종목 구독: {', '.join(subs)}"
         if extra:
             msg += f"\n➕ 추가 키워드: {', '.join(esc(k) for k in extra)}"
         return msg
@@ -263,6 +268,34 @@ def handle_command(text: str, cfg: dict) -> str | None:
                  for i, (name, _, emoji) in enumerate(DISCLOSURE_TYPES, 1)]
         return ("🔧 <b>감시 공시 서식</b> (DART 서식명 기준)\n"
                 "끄기: /유형 번호 끄기 · 켜기: /유형 번호 켜기\n" + "\n".join(lines))
+
+    if cmd in ("/전체", "/all"):
+        names = [name for name, _, _ in DISCLOSURE_TYPES]
+        subs = cfg.setdefault("types_all", [])
+        if len(parts) >= 3 and parts[-1] in ("끄기", "켜기", "off", "on"):
+            turn_on = parts[-1] in ("켜기", "on")
+            targets: list[str] = []
+            for tok in parts[1:-1]:
+                if tok.isdigit() and 1 <= int(tok) <= len(names):
+                    targets.append(names[int(tok) - 1])
+                elif tok in TYPES_BY_NAME:
+                    targets.append(tok)
+                else:
+                    return f"'{esc(tok)}' 은 목록에 없습니다. /유형 으로 번호를 확인하세요."
+            for t in targets:
+                if t == LARGE_HOLDING:
+                    return "5% 보고는 원래 전 종목 감시입니다 (/유형 으로 켜고 끄세요)."
+                if turn_on and t not in subs:
+                    subs.append(t)
+                if not turn_on and t in subs:
+                    subs.remove(t)
+            verb = "전 종목 구독 시작" if turn_on else "전 종목 구독 해제"
+            return f"🌐 {', '.join(targets)} — {verb} (현재 {len(subs)}종)"
+        if subs:
+            return ("🌐 <b>전 종목 구독 중인 서식</b>\n"
+                    + "\n".join(f" • {s}" for s in subs)
+                    + "\n해제: /전체 이름(또는 번호) 끄기")
+        return "🌐 전 종목 구독 중인 서식 없음\n예: /전체 31 켜기 (번호는 /유형 참고)"
 
     if cmd in ("/키워드", "/keyword"):
         if len(parts) >= 3 and parts[1] in ("추가", "삭제"):
@@ -363,15 +396,27 @@ def classify(item: dict, watch: dict[str, str], cfg: dict) -> str | None:
     rcept_no = item.get("rcept_no") or ""
     link = DART_VIEWER + rcept_no
     compact = re.sub(r"\s+", "", title)
+    mkt = MARKET_LABEL.get(item.get("corp_cls", ""), "")
+    corp_disp = f"({mkt}){esc(corp)}" if mkt else esc(corp)
 
     # 대량보유 보고 (전 종목, 보고자 필터)
     if LARGE_HOLDING not in off:
         pattern, emoji = TYPES_BY_NAME[LARGE_HOLDING]
         if pattern.search(compact) and any(k in filer for k in FILER_KEYWORDS):
-            return (f"{emoji} <b>[5% 보고] {esc(corp)}</b>{f' ({code})' if code else ''}\n"
+            return (f"{emoji} <b>[5% 보고] {corp_disp}</b>{f' ({code})' if code else ''}\n"
                     f"{esc(title)}\n보고자: {esc(filer)}\n{link}")
 
-    if not code or code not in watch:
+    in_watch = bool(code) and code in watch
+
+    # 전 종목 구독 서식 (관심종목 무관)
+    if not in_watch:
+        for name in cfg.get("types_all", []):
+            if name == LARGE_HOLDING or name not in TYPES_BY_NAME or not code:
+                continue
+            pattern, emoji = TYPES_BY_NAME[name]
+            if pattern.search(compact):
+                return (f"🌐{emoji} <b>[{name}·전체] {corp_disp}</b> ({code})\n"
+                        f"{esc(title)}\n{link}")
         return None
 
     # 관심종목: 서식 목록에서 첫 매칭
@@ -380,7 +425,7 @@ def classify(item: dict, watch: dict[str, str], cfg: dict) -> str | None:
             continue
         pattern, emoji = TYPES_BY_NAME[name]
         if pattern.search(compact):
-            return (f"{emoji} <b>[{name}] {esc(corp)}</b> ({code})\n"
+            return (f"{emoji} <b>[{name}] {corp_disp}</b> ({code})\n"
                     f"{esc(title)}"
                     f"{f'{chr(10)}제출: {esc(filer)}' if filer and filer != corp else ''}\n"
                     f"{link}")
@@ -388,7 +433,7 @@ def classify(item: dict, watch: dict[str, str], cfg: dict) -> str | None:
     # 사용자 추가 키워드
     for word in cfg.get("keywords_extra", []):
         if word and word in compact:
-            return (f"🔍 <b>[키워드: {esc(word)}] {esc(corp)}</b> ({code})\n"
+            return (f"🔍 <b>[키워드: {esc(word)}] {corp_disp}</b> ({code})\n"
                     f"{esc(title)}\n{link}")
 
     return None

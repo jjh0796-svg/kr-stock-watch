@@ -225,9 +225,41 @@ def scan_flow(base_dd: str, rows: list[dict]) -> tuple[list[str], str]:
 
 # ─── 5) 공매도 급증 — 관심종목 (pykrx, KRX 로그인 필요) ────────────────────────
 
+_KRX_LOGIN_BASE = "https://data.krx.co.kr/contents/MDC/COMS/client"
+
+
+def krx_login_diag() -> str | None:
+    """pykrx와 같은 흐름으로 로그인을 시도해 실패 사유를 돌려준다 (성공이면 None).
+    비밀번호는 어떤 경우에도 출력하지 않는다 — 오류 코드/메시지만."""
+    kid, kpw = os.environ.get("KRX_ID", ""), os.environ.get("KRX_PW", "")
+    if not (kid and kpw):
+        return "KRX_ID/KRX_PW 시크릿 미설정"
+    try:
+        s = requests.Session()
+        ua = {"User-Agent": UA_HEADERS["User-Agent"]}
+        s.get(f"{_KRX_LOGIN_BASE}/MDCCOMS001.cmd", headers=ua, timeout=15)
+        s.get(f"{_KRX_LOGIN_BASE}/view/login.jsp?site=mdc",
+              headers={**ua, "Referer": f"{_KRX_LOGIN_BASE}/MDCCOMS001.cmd"}, timeout=15)
+        payload = {"mbrNm": "", "telNo": "", "di": "", "certType": "",
+                   "mbrId": kid, "pw": kpw}
+        r = s.post(f"{_KRX_LOGIN_BASE}/MDCCOMS001D1.cmd", data=payload,
+                   headers={**ua, "Referer": f"{_KRX_LOGIN_BASE}/MDCCOMS001.cmd"},
+                   timeout=15)
+        d = r.json()
+        code = d.get("_error_code", "")
+        if code in ("CD001", "CD011"):   # 정상 / 중복 로그인(무시 가능)
+            return None
+        return f"{code} {d.get('_error_message', '')}".strip()
+    except Exception as e:
+        return f"로그인 진단 실패: {type(e).__name__}"
+
+
 def scan_short(base_dd: str, watch: dict[str, str]) -> tuple[list[str], str | None]:
     if not watch:
         return [], "관심종목 없음"
+    diag = krx_login_diag()
+    if diag:
+        return [], f"KRX 로그인 불가: {diag}"
     try:
         from pykrx import stock  # import 시 KRX 로그인 시도 — 실패해도 다른 섹션은 살린다
     except Exception as e:
