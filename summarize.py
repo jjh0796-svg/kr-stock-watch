@@ -386,7 +386,8 @@ def _sum_earnings(api_key: str, rcept_no: str, ctx: dict | None = None) -> str |
             pass
     cons_vals = cons[1] if cons and cons[0] == cur_key else None
     # 네이버 컨센서스는 연결 기준 — 별도 실적 공시에는 기준을 명시해 혼동 방지
-    est_label = "예상" if "연결" in text[:400] else "예상(연결)"
+    # (원문 앞부분은 CSS 잡음이라 헤더가 나오는 구간까지 넉넉히 본다)
+    est_label = "예상" if "연결" in text[:1600] else "예상(연결)"
 
     def fmt(name, m, cons_key):
         if not m:
@@ -398,7 +399,7 @@ def _sum_earnings(api_key: str, rcept_no: str, ctx: dict | None = None) -> str |
         est = cons_vals.get(cons_key) if cons_vals else None
         if est:
             actual_eok = m[0] * unit / 1e8
-            notes.append(f"{est_label} {est:,.0f}억 대비 {(actual_eok / est - 1) * 100:+.0f}%")
+            notes.append(f"{est_label} {_eok(est * 1e8)} 대비 {(actual_eok / est - 1) * 100:+.0f}%")
         if notes:
             line += f" ({' · '.join(notes)})"
         return line
