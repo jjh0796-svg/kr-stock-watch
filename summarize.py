@@ -7,6 +7,7 @@
 # 실패하면 None을 돌려주고 알림은 요약 없이 그대로 나간다.
 # ==========================================
 import io
+import os
 import re
 import zipfile
 from datetime import datetime, timedelta
@@ -16,6 +17,58 @@ import requests
 from common import UA_HEADERS, esc
 
 DART_BASE = "https://opendart.fss.or.kr/api"
+
+# ─── Gemini 폴백 (규칙 파싱이 실패한 공시의 원문 요약) ────────────────────────
+GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
+_GEMINI_MODELS = [m for m in (
+    os.environ.get("GEMINI_MODEL", ""),
+    "gemini-flash-lite-latest", "gemini-flash-latest", "gemini-2.5-flash",
+) if m]
+_gemini_model_ok: str | None = None
+
+
+def _llm_summary(title: str, dart_key: str, rcept_no: str) -> str | None:
+    """규칙 파서가 못 잡은 공시를 Gemini로 2~3줄 요약 (키 없거나 실패 시 None)."""
+    global _gemini_model_ok
+    if not GEMINI_KEY:
+        return None
+    try:
+        text = _doc_text(dart_key, rcept_no)
+    except Exception:
+        return None
+    body = re.sub(r"^.*?xforms_input\{[^}]*\}", "", text)[:6000]  # 앞머리 CSS 제거
+    if len(body) < 150:
+        return None
+    prompt = (
+        "다음은 한국 상장사의 DART 공시 원문이다. 투자자 관점에서 핵심만 2~3줄로 "
+        "요약하라. 금액·수량·당사자·사유·일정 등 구체 정보를 우선하고, 과장이나 "
+        "해석 없이 사실만. 기재정정이면 무엇이 어떻게 바뀌었는지를 중심으로. "
+        "한국어 평문으로만 답하고 머리기호나 마크다운은 쓰지 마라.\n\n"
+        f"공시 제목: {title}\n원문: {body}"
+    )
+    models = [_gemini_model_ok] if _gemini_model_ok else _GEMINI_MODELS
+    for model in models:
+        try:
+            r = requests.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                params={"key": GEMINI_KEY},
+                json={"contents": [{"parts": [{"text": prompt}]}],
+                      "generationConfig": {"temperature": 0.2, "maxOutputTokens": 400}},
+                timeout=40)
+            if r.status_code in (404, 429):
+                continue  # 모델 폐기(404)·무료쿼터 회수(429) 시 다음 후보
+            if r.status_code != 200:
+                print(f"[Gemini] HTTP {r.status_code}: {r.text[:120]}")
+                return None
+            out = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+            if not out:
+                return None
+            _gemini_model_ok = model
+            return "🤖 " + esc(out[:600])
+        except Exception as e:
+            print(f"[Gemini] {type(e).__name__}: {e}")
+            return None
+    return None
 
 
 def _num(v) -> float | None:
@@ -681,4 +734,7 @@ def summarize(item: dict, api_key: str) -> str | None:
                     break
     except Exception as e:
         print(f"[요약 실패] {rcept_no} {title[:30]}: {type(e).__name__}: {e}")
-    return result if _informative(result) else None
+    if _informative(result):
+        return result
+    # 규칙 파싱이 없거나 실패한 공시(철회·정정·합병·소송 등) — Gemini 폴백
+    return _llm_summary(title, api_key, rcept_no)

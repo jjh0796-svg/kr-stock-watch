@@ -54,6 +54,7 @@ DART 주요공시 1분 감시 + 마감 후 데일리 스캔 → 텔레그램 알
 | `DART_API_KEY` | opendart.fss.or.kr 인증키 |
 | `KRX_AUTH_KEY` | KRX OpenAPI 키 (data.krx.co.kr 신청) |
 | `KRX_ID` / `KRX_PW` | KRX 정보데이터시스템 로그인 (공매도 섹션용, 없으면 해당 섹션만 실패 표시) |
+| `GEMINI_API_KEY` | (선택) 규칙 파서가 못 잡는 공시(철회·정정·소송·합병 등)를 Gemini로 요약 — 🤖 표시 |
 | `WATCHLIST` | (선택) `005930:삼성전자,000660:SK하이닉스` — 등록하면 watchlist.csv 대신 사용 |
 
 ### 3. cron-job.org 세팅 (1분 단위 공시 감시의 핵심)

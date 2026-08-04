@@ -25,7 +25,7 @@ import requests
 
 from common import (DRY_RUN, UA_HEADERS, esc, load_state, load_watch_config,
                     load_watchlist, now_kst, save_state, save_watch_config, tg_send)
-from summarize import summarizable, summarize
+from summarize import summarize
 
 DART_LIST_URL = "https://opendart.fss.or.kr/api/list.json"
 DART_VIEWER = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="
@@ -518,9 +518,10 @@ def poll_once(api_key: str, state: dict, cfg: dict) -> None:
             if summary:
                 head, _, link = msg.rpartition("\n")
                 msg = f"{head}\n{summary}\n{link}"
-            elif summarizable(it.get("report_nm") or ""):
+            else:
                 # 접수 직후엔 원문 파일·구조화 API 등록이 늦을 수 있다 — 알림은
-                # 먼저 보내고, 요약은 데이터가 올라오는 대로 후속 메시지로 발송
+                # 먼저 보내고, 요약(규칙 또는 Gemini)은 데이터가 올라오는 대로
+                # 후속 메시지로 발송
                 state.setdefault("pending_sum", {})[it["rcept_no"]] = {
                     "tries": 0,
                     "corp": it.get("corp_name", ""),
