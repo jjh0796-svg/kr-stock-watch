@@ -169,6 +169,11 @@ def _sum_rights_issue(row: dict, code: str, api_key: str = "", rcept_no: str = "
         kinds.append(f"보통주 {ostk:,.0f}주")
     if estk:
         kinds.append(f"기타주식(우선주 등) {estk:,.0f}주")
+    if not kinds and not total and api_key and rcept_no:
+        # 기재정정 등으로 구조화 값이 전부 '-'인 경우 — 원문에서 직접 추출
+        doc = _sum_rights_doc(api_key, rcept_no, code)
+        if doc:
+            return doc
     out = "신주: " + (" + ".join(kinds) if kinds else "-")
     if total:
         out += f" · 조달 {_eok(total)}" + _vs_cap(total, code)
@@ -464,6 +469,59 @@ def _sum_asset(api_key: str, rcept_no: str, ctx: dict | None = None) -> str | No
     return "\n".join(lines) if lines else None
 
 
+def _sum_exercise(api_key: str, rcept_no: str, ctx: dict | None = None) -> str | None:
+    """전환청구권·신주인수권·교환청구권 행사 — 행사주식수·총수대비·잔여 물량"""
+    text = _doc_text(api_key, rcept_no)
+    shares = _num((re.search(r"행사주식수\s*누계\s*\(주\)[^\d]*([\d,]+)", text) or [None, None])[1])
+    pct = _num((re.search(r"발행주식총수\s*대비\s*\(%\)\s*([\d.,]+)", text) or [None, None])[1])
+    lines = []
+    if shares:
+        line = f"행사: {shares:,.0f}주"
+        if pct is not None:
+            line += f" (발행주식총수 대비 {pct:.2f}%)"
+        lines.append(line)
+    row = re.search(r"(\d{4}-\d{2}-\d{2})\s+\d{1,3}\s+\S.{0,60}?([\d,]{6,})\s*원\s+([\d,]+)\s+([\d,]+)\s+(\d{4}-\d{2}-\d{2})", text)
+    if row:
+        prc = _num(row.group(3))
+        if prc:
+            lines.append(f"전환/행사가 {prc:,.0f}원 · 상장예정 {row.group(5)}")
+    rem = re.search(r"잔액.{0,200}?([\d,]{7,})\s*KRW[^0-9]*([\d,]{7,})\s*KRW[^0-9]*([\d,]+)\s+([\d,]+)", text)
+    if rem:
+        remaining, convertible = _num(rem.group(2)), _num(rem.group(4))
+        if remaining and convertible:
+            lines.append(f"미전환 잔액 {_eok(remaining)} → 추가 전환가능 {convertible:,.0f}주")
+    return "\n".join(lines) if lines else None
+
+
+def _sum_rights_doc(api_key: str, rcept_no: str, code: str) -> str | None:
+    """유상증자: 구조화 API가 비어 있을 때 원문에서 직접 추출하는 폴백."""
+    text = _doc_text(api_key, rcept_no)
+    ostk = _num((re.search(r"보통주식\s*\(주\)\s*([\d,\-]+)", text) or [None, None])[1])
+    estk = _num((re.search(r"기타주식\s*\(주\)\s*([\d,\-]+)", text) or [None, None])[1])
+    funds = [_num(m) for m in re.findall(
+        r"(?:시설자금|영업양수자금|운영자금|채무상환자금|타법인\s*증권취득자금|기타자금)\s*\(원\)\s*([\d,\-]+)", text)]
+    total = sum(f for f in funds if f)
+    mth = (re.search(r"\d\.\s*증자방식\s*(\S+)", text) or [None, ""])[1]
+    kinds = []
+    if ostk:
+        kinds.append(f"보통주 {ostk:,.0f}주")
+    if estk:
+        kinds.append(f"기타주식(우선주 등) {estk:,.0f}주")
+    if not kinds and not total:
+        return None
+    out = "신주: " + (" + ".join(kinds) if kinds else "-")
+    if total:
+        out += f" · 조달 {_eok(total)}" + _vs_cap(total, code)
+    if mth:
+        out += f"\n방식: {esc(mth)}"
+    sec = re.search(r"【(?:특정인에\s*대한\s*)?(?:제3자배정\s*)?대상자별[^】]*】(.{0,1200})", text)
+    if sec:
+        m = re.search(r"비\s*고\s*(.+?)\s+(?:없음|최대주주|특수관계\S*|계열\S*|-\s)", sec.group(1))
+        if m and 0 < len(m.group(1).strip()) <= 60:
+            out += f"\n대상: {esc(m.group(1).strip())}"
+    return out
+
+
 def _sum_earnings(api_key: str, rcept_no: str, ctx: dict | None = None) -> str | None:
     text = _doc_text(api_key, rcept_no)
     unit = _detect_unit_won(text)
@@ -541,6 +599,7 @@ DOC_SUMMARIZERS: dict[str, tuple[object, str, str]] = {
     "ir": (_sum_ir, "IR요약", "🔔"),
     "repricing": (_sum_repricing, "리픽싱요약", "⚠️"),
     "asset": (_sum_asset, "자산양수도요약", "🚨"),
+    "exercise": (_sum_exercise, "행사요약", "⚠️"),
 }
 
 
@@ -557,6 +616,8 @@ def doc_kind(title: str) -> str | None:
         return "repricing"
     if re.search(r"유형자산(양[수도]|취득|처분)", t):
         return "asset"
+    if re.search(r"(전환청구권|신주인수권|교환청구권)행사", t):
+        return "exercise"
     return None
 
 
@@ -587,6 +648,11 @@ _RULES: list[tuple[str, str | None, object]] = [
 ]
 
 
+def _informative(s: str | None) -> bool:
+    """숫자 정보가 사실상 없는 껍데기 요약은 발송하지 않는다."""
+    return bool(s) and bool(re.search(r"\d{2,}|\d\s*[억조원주%회]", s))
+
+
 def summarize(item: dict, api_key: str) -> str | None:
     """탐지된 공시 1건의 내용 요약 (실패 시 None — 알림은 요약 없이 나간다)."""
     title = re.sub(r"\s+", "", item.get("report_nm") or "")
@@ -595,24 +661,24 @@ def summarize(item: dict, api_key: str) -> str | None:
     rcept_no = item.get("rcept_no") or ""
     rcept_dt = item.get("rcept_dt") or ""
 
+    result = None
     try:
-        # 원문 파싱 계열 (잠정실적·공급계약·IR)
+        # 원문 파싱 계열 (잠정실적·공급계약·IR·리픽싱·행사 등)
         kind = doc_kind(title)
         if kind:
             fn = DOC_SUMMARIZERS[kind][0]
-            return fn(api_key, rcept_no, {"code": code, "corp_code": corp_code})
-
+            result = fn(api_key, rcept_no, {"code": code, "corp_code": corp_code})
         # 주요사항보고서 계열 — 구조화 API
-        if corp_code and rcept_dt:
+        elif corp_code and rcept_dt:
             cb_kinds = {"cvbdIsDecsn": "CB", "bdwtIsDecsn": "BW", "exbdIsDecsn": "EB"}
             for pat, api, fn in _RULES:
                 if re.search(pat, title):
                     row = _pick(_dart_rows(api, api_key, corp_code, rcept_dt), rcept_no)
                     if row:
-                        return fn(row, code, api_key, rcept_no)
-                    if api in cb_kinds:  # 구조화 API 누락 시 원문 폴백
-                        return _sum_cb_doc(api_key, rcept_no, code, cb_kinds[api])
-                    return None
+                        result = fn(row, code, api_key, rcept_no)
+                    elif api in cb_kinds:  # 구조화 API 누락 시 원문 폴백
+                        result = _sum_cb_doc(api_key, rcept_no, code, cb_kinds[api])
+                    break
     except Exception as e:
         print(f"[요약 실패] {rcept_no} {title[:30]}: {type(e).__name__}: {e}")
-    return None
+    return result if _informative(result) else None
