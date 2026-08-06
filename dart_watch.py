@@ -25,7 +25,9 @@ import requests
 
 from common import (DRY_RUN, UA_HEADERS, esc, load_state, load_watch_config,
                     load_watchlist, now_kst, save_state, save_watch_config, tg_send)
-from summarize import summarize
+from summarize import _issue_targets, summarize
+
+ISSUE_RE = re.compile(r"유상증자결정|유무상증자결정|사채권발행결정")  # 발행대상이 있는 서식
 
 DART_LIST_URL = "https://opendart.fss.or.kr/api/list.json"
 DART_VIEWER = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="
@@ -518,6 +520,15 @@ def poll_once(api_key: str, state: dict, cfg: dict) -> None:
             if summary:
                 head, _, link = msg.rpartition("\n")
                 msg = f"{head}\n{summary}\n{link}"
+                compact_title = re.sub(r"\s+", "", it.get("report_nm") or "")
+                if ISSUE_RE.search(compact_title) and "대상:" not in summary:
+                    # 수치(구조화 API)는 나왔지만 원문(발행대상)이 아직인 시차 —
+                    # 대상자만 후속 메시지로 따라가게 별도 재시도
+                    state.setdefault("pending_tgt", {})[it["rcept_no"]] = {
+                        "tries": 0,
+                        "corp": it.get("corp_name", ""),
+                        "code": (it.get("stock_code") or "").strip(),
+                    }
             else:
                 # 접수 직후엔 원문 파일·구조화 API 등록이 늦을 수 있다 — 알림은
                 # 먼저 보내고, 요약(규칙 또는 Gemini)은 데이터가 올라오는 대로
@@ -570,6 +581,27 @@ def retry_pending_summaries(api_key: str, state: dict) -> None:
         elif tries >= 150:
             print(f"[요약 포기] {rcept_no} — 데이터 미등록 (약 2.5시간 경과)")
             del pending[rcept_no]
+
+    # 발행대상만 밀린 건 (수치 요약은 이미 발송됨)
+    pending_tgt: dict = state.get("pending_tgt", {})
+    for rcept_no, info in list(pending_tgt.items()):
+        info["tries"] = info.get("tries", 0) + 1
+        tries = info["tries"]
+        if tries > 10 and tries % 5 != 0:
+            continue
+        target = None
+        try:
+            target = _issue_targets(api_key, rcept_no)
+        except Exception:
+            pass
+        if target:
+            code = info.get("code", "")
+            code_tag = f" ({code})" if code else ""
+            tg_send(f"🎯 <b>[발행대상] {esc(info.get('corp', ''))}</b>{code_tag}\n"
+                    f"{target}\n{DART_VIEWER}{rcept_no}")
+            del pending_tgt[rcept_no]
+        elif tries >= 150:
+            del pending_tgt[rcept_no]
     save_state(STATE_FILE, state)
 
 
