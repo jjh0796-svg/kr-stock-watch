@@ -427,9 +427,9 @@ def _sum_ir(api_key: str, rcept_no: str, ctx: dict | None = None) -> str | None:
     return "\n".join(lines) if lines else None
 
 
-# 네이버 분기 재무: 과거 분기 실적(추이) + 다음 분기 컨센서스(isConsensus=Y), 단위 억원
-def _naver_quarters(code: str) -> tuple[list[tuple[str, dict]], tuple[str, dict] | None]:
-    r = requests.get(f"https://m.stock.naver.com/api/stock/{code}/finance/quarter",
+# 네이버 재무: 과거 실적(추이) + 컨센서스(isConsensus=Y), 단위 억원
+def _naver_finance(code: str, period: str) -> tuple[list[tuple[str, dict]], tuple[str, dict] | None]:
+    r = requests.get(f"https://m.stock.naver.com/api/stock/{code}/finance/{period}",
                      headers=UA_HEADERS, timeout=10)
     info = r.json().get("financeInfo", {})
     cols = [(t.get("key"), t.get("isConsensus") == "Y") for t in info.get("trTitleList", [])]
@@ -452,6 +452,138 @@ def _naver_quarters(code: str) -> tuple[list[tuple[str, dict]], tuple[str, dict]
             past.append((key, vals))
     past.sort(key=lambda x: x[0], reverse=True)
     return past, cons
+
+
+def _naver_quarters(code: str):
+    return _naver_finance(code, "quarter")
+
+
+# ─── 기업 컨텍스트 (지표 한 줄 · /기업 카드) ──────────────────────────────────
+
+_infos_cache: dict[str, dict] = {}
+
+
+def _naver_infos(code: str) -> dict[str, str]:
+    """네이버 종목 지표 {'시총': '1,335조 8,747억', 'PER': '18.47배', ...} (런당 캐시)"""
+    if code in _infos_cache:
+        return _infos_cache[code]
+    out: dict[str, str] = {}
+    try:
+        r = requests.get(f"https://m.stock.naver.com/api/stock/{code}/integration",
+                         headers=UA_HEADERS, timeout=10)
+        for info in r.json().get("totalInfos", []):
+            k, v = info.get("key"), info.get("value")
+            if k and v:
+                out[str(k)] = str(v)
+    except Exception:
+        pass
+    _infos_cache[code] = out
+    return out
+
+
+def _compact_cap(txt: str) -> str | None:
+    jo = re.search(r"([\d,]+)\s*조", txt)
+    eok = re.search(r"([\d,]+)\s*억", txt)
+    if jo:
+        whole = float(jo.group(1).replace(",", ""))
+        frac = float(eok.group(1).replace(",", "")) / 10000 if eok else 0
+        return f"{whole + frac:,.1f}조".replace(".0조", "조")
+    if eok:
+        return f"{eok.group(1)}억"
+    return None
+
+
+def stock_snapshot(code: str) -> str | None:
+    """알림 하단용 지표 한 줄: 📌 시총 · PER · PBR · 배당"""
+    infos = _naver_infos(code)
+    parts = []
+    cap = _compact_cap(infos.get("시총", ""))
+    if cap:
+        parts.append(f"시총 {cap}")
+    for label, key in (("PER", "PER"), ("PBR", "PBR")):
+        v = infos.get(key, "").replace("배", "").strip()
+        if v and v not in ("-", "N/A"):
+            parts.append(f"{label} {v}")
+    dy = infos.get("배당수익률", "").strip()
+    if dy and dy not in ("-", "N/A"):
+        parts.append(f"배당 {dy}")
+    return "📌 " + " · ".join(parts) if parts else None
+
+
+def _fin_table(title: str, past: list, cons, label_fn, rows_n: int) -> list[str]:
+    lines = [f"{title} (매출/영업익/순이익)"]
+
+    def val(v):
+        return _eok(v * 1e8) if v is not None else "-"
+
+    if cons:
+        k, v = cons
+        lines.append(f" {label_fn(k)}E {val(v['rev'])}/ {val(v['op'])}/ {val(v['ni'])} ← 컨센서스")
+    for k, v in past[:rows_n]:
+        lines.append(f" {label_fn(k)} {val(v['rev'])}/ {val(v['op'])}/ {val(v['ni'])}")
+    return lines if len(lines) > 1 else []
+
+
+def company_card(code: str, name: str) -> str | None:
+    """/기업 명령: 기업 개요·지표·연간/분기 실적 카드"""
+    infos = _naver_infos(code)
+    # 시세·시장 구분 (다음)
+    market, price_line = "", ""
+    try:
+        r = requests.get(f"https://finance.daum.net/api/quotes/A{code}",
+                         params={"summary": "false"},
+                         headers={**UA_HEADERS, "Referer": "https://finance.daum.net/"},
+                         timeout=10)
+        q = r.json()
+        market = {"KOSPI": "코스피", "KOSDAQ": "코스닥"}.get(q.get("market", ""), "")
+        price = q.get("tradePrice")
+        rate = q.get("changeRate")
+        if price:
+            price_line = f"현재가 {price:,.0f}"
+            if rate is not None:
+                price_line += f" ({rate * 100:+.1f}%)"
+    except Exception:
+        pass
+
+    head = f"🏢 <b>{esc(name)} ({code})</b>"
+    if market:
+        head += f" · {market}"
+    lines = [head]
+    cap = _compact_cap(infos.get("시총", ""))
+    seg = [s for s in (price_line, f"시총 {cap}" if cap else "") if s]
+    if seg:
+        lines.append(" · ".join(seg))
+    metrics = []
+    for label, key in (("PER", "PER"), ("추정PER", "추정PER"), ("PBR", "PBR")):
+        v = infos.get(key, "").replace("배", "").strip()
+        if v and v not in ("-", "N/A"):
+            metrics.append(f"{label} {v}")
+    dy = infos.get("배당수익률", "").strip()
+    if dy and dy not in ("-", "N/A"):
+        metrics.append(f"배당 {dy}")
+    if metrics:
+        lines.append(" · ".join(metrics))
+    hi, lo = infos.get("52주 최고", ""), infos.get("52주 최저", "")
+    if hi and lo:
+        lines.append(f"52주 {hi} / {lo}")
+
+    try:
+        apast, acons = _naver_finance(code, "annual")
+        tbl = _fin_table("연간", apast, acons, lambda k: f"FY{k[2:4]}", 3)
+        if tbl:
+            lines.append("")
+            lines.extend(tbl)
+    except Exception:
+        pass
+    try:
+        qpast, qcons = _naver_finance(code, "quarter")
+        tbl = _fin_table("분기", qpast, qcons, _qlabel, 4)
+        if tbl:
+            lines.append("")
+            lines.extend(tbl)
+    except Exception:
+        pass
+    return "\n".join(lines) if len(lines) > 1 else None
 
 
 def _infer_quarter(text: str, rcept_no: str) -> str:
@@ -640,6 +772,12 @@ def _sum_earnings(api_key: str, rcept_no: str, ctx: dict | None = None) -> str |
             lines.append(f" {_qlabel(k)} {_eok((v['rev'] or 0) * 1e8)}/"
                          f" {_eok(v['op'] * 1e8) if v['op'] is not None else '-'}/"
                          f" {_eok(v['ni'] * 1e8) if v['ni'] is not None else '-'}")
+    if code:
+        try:
+            apast, acons = _naver_finance(code, "annual")
+            lines.extend(_fin_table("연간", apast, acons, lambda k: f"FY{k[2:4]}", 3))
+        except Exception:
+            pass
     return "\n".join(lines)
 
 

@@ -25,7 +25,7 @@ import requests
 
 from common import (DRY_RUN, UA_HEADERS, esc, load_state, load_watch_config,
                     load_watchlist, now_kst, save_state, save_watch_config, tg_send)
-from summarize import _issue_targets, summarize
+from summarize import _issue_targets, company_card, stock_snapshot, summarize
 
 ISSUE_RE = re.compile(r"유상증자결정|유무상증자결정|사채권발행결정")  # 발행대상이 있는 서식
 
@@ -162,6 +162,7 @@ HELP_TEXT = (
     "/추가 005930 또는 /추가 에프에스티 — 관심종목 추가 (이름·코드 자동 매칭)\n"
     "/삭제 005930 또는 /삭제 에프에스티 — 관심종목 제외\n"
     "/목록 — 현재 관심종목·설정 보기\n"
+    "/기업 삼성전자 — 기업 카드 (시세·지표·연간/분기 실적·컨센서스)\n"
     "/유형 — 감시 중인 공시 서식 목록(번호) 보기\n"
     "/유형 7 끄기 — 7번 서식 알림 중단 (여러 개: /유형 7 8 9 끄기)\n"
     "/유형 전환가액의조정 켜기 — 이름으로도 가능\n"
@@ -274,6 +275,34 @@ def handle_command(text: str, cfg: dict) -> str | None:
         return ("🔧 <b>감시 공시 서식</b> (DART 서식명 기준)\n"
                 "끄기: /유형 번호 끄기 · 켜기: /유형 번호 켜기\n" + "\n".join(lines))
 
+    if cmd in ("/기업", "/co", "/company"):
+        if len(parts) < 2:
+            return "형식: /기업 종목명 또는 /기업 종목코드\n예: /기업 삼성전자"
+        arg = " ".join(parts[1:]).strip()
+        watch = merged_watchlist(cfg)
+        code = name = None
+        if re.fullmatch(r"[0-9A-Z]{6}", arg):
+            code, name = arg, watch.get(arg) or daum_name_of(arg) or arg
+        else:
+            hits = [c for c, n in watch.items() if n == arg] or \
+                   [c for c, n in watch.items() if arg in n]
+            if len(hits) == 1:
+                code, name = hits[0], watch[hits[0]]
+            else:
+                results = daum_search(arg)
+                exact = [r for r in results if r[1] == arg]
+                if exact:
+                    code, name = exact[0]
+                elif len(results) == 1:
+                    code, name = results[0]
+                elif results:
+                    lines = [f" • {esc(n)} ({c})" for c, n in results[:5]]
+                    return "🔎 여러 종목이 검색됐습니다. 코드로 지정해 주세요:\n" + "\n".join(lines)
+        if not code:
+            return f"'{esc(arg)}' 종목을 찾지 못했습니다."
+        card = company_card(code, name)
+        return card or f"{esc(name)} ({code}) 정보를 가져오지 못했습니다."
+
     if cmd in ("/전체", "/all"):
         names = [name for name, _, _ in DISCLOSURE_TYPES]
         subs = cfg.setdefault("types_all", [])
@@ -344,6 +373,7 @@ def handle_command(text: str, cfg: dict) -> str | None:
 # 텔레그램 "/" 팝업 메뉴 (봇 명령은 영문만 등록 가능 — 한국어 명령과 병행 동작)
 COMMAND_MENU = [
     ("list", "관심종목·설정 보기 (=/목록)"),
+    ("co", "기업 카드 — 뒤에 이름이나 코드 (=/기업)"),
     ("types", "감시 공시 서식 보기·켜기/끄기 (=/유형)"),
     ("all", "전 종목 구독 관리 (=/전체)"),
     ("add", "종목 추가 — 뒤에 이름이나 코드 (=/추가)"),
@@ -541,6 +571,12 @@ def poll_once(api_key: str, state: dict, cfg: dict) -> None:
                     "rcept_dt": it.get("rcept_dt", ""),
                     "title": it.get("report_nm", ""),
                 }
+            code = (it.get("stock_code") or "").strip()
+            if code:  # 어떤 공시든 회사 체급을 한 줄로 (📌 시총·PER·PBR·배당)
+                snap = stock_snapshot(code)
+                if snap:
+                    head, _, link = msg.rpartition("\n")
+                    msg = f"{head}\n{snap}\n{link}"
             tg_send(msg)
             alerts += 1
             time.sleep(0.5)
