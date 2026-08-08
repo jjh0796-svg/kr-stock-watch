@@ -558,6 +558,7 @@ def poll_once(api_key: str, state: dict, cfg: dict) -> None:
                         "tries": 0,
                         "corp": it.get("corp_name", ""),
                         "code": (it.get("stock_code") or "").strip(),
+                        "title": it.get("report_nm", ""),
                     }
             else:
                 # 접수 직후엔 원문 파일·구조화 API 등록이 늦을 수 있다 — 알림은
@@ -613,6 +614,12 @@ def retry_pending_summaries(api_key: str, state: dict) -> None:
             code_tag = f" ({code})" if code else ""
             tg_send(f"🧾 <b>[요약] {esc(info.get('corp', ''))}</b>{code_tag}\n"
                     f"{esc(info.get('title', ''))}\n{summary}\n{DART_VIEWER}{rcept_no}")
+            title_compact = re.sub(r"\s+", "", info.get("title", ""))
+            if ISSUE_RE.search(title_compact) and "대상:" not in summary:
+                state.setdefault("pending_tgt", {})[rcept_no] = {
+                    "tries": 0, "corp": info.get("corp", ""),
+                    "code": code, "title": info.get("title", ""),
+                }
             del pending[rcept_no]
         elif tries >= 150:
             print(f"[요약 포기] {rcept_no} — 데이터 미등록 (약 2.5시간 경과)")
@@ -633,8 +640,10 @@ def retry_pending_summaries(api_key: str, state: dict) -> None:
         if target:
             code = info.get("code", "")
             code_tag = f" ({code})" if code else ""
+            title = info.get("title", "")
+            title_line = f"{esc(title)}\n" if title else ""
             tg_send(f"🎯 <b>[발행대상] {esc(info.get('corp', ''))}</b>{code_tag}\n"
-                    f"{target}\n{DART_VIEWER}{rcept_no}")
+                    f"{title_line}{target}\n{DART_VIEWER}{rcept_no}")
             del pending_tgt[rcept_no]
         elif tries >= 150:
             del pending_tgt[rcept_no]

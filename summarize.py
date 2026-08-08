@@ -27,8 +27,10 @@ _GEMINI_MODELS = [m for m in (
 _gemini_model_ok: str | None = None
 
 
-def _llm_summary(title: str, dart_key: str, rcept_no: str) -> str | None:
-    """규칙 파서가 못 잡은 공시를 Gemini로 2~3줄 요약 (키 없거나 실패 시 None)."""
+def _llm_summary(title: str, dart_key: str, rcept_no: str,
+                 mode: str = "summary") -> str | None:
+    """규칙 파서가 못 잡은 공시를 Gemini로 요약 (키 없거나 실패 시 None).
+    mode="delta"는 기재정정 공시의 '정정 전후 변동'만 뽑는다."""
     global _gemini_model_ok
     if not GEMINI_KEY:
         return None
@@ -39,13 +41,22 @@ def _llm_summary(title: str, dart_key: str, rcept_no: str) -> str | None:
     body = re.sub(r"^.*?xforms_input\{[^}]*\}", "", text)[:6000]  # 앞머리 CSS 제거
     if len(body) < 150:
         return None
-    prompt = (
-        "다음은 한국 상장사의 DART 공시 원문이다. 투자자 관점에서 핵심만 2~3줄로 "
-        "요약하라. 금액·수량·당사자·사유·일정 등 구체 정보를 우선하고, 과장이나 "
-        "해석 없이 사실만. 기재정정이면 무엇이 어떻게 바뀌었는지를 중심으로. "
-        "한국어 평문으로만 답하고 머리기호나 마크다운은 쓰지 마라.\n\n"
-        f"공시 제목: {title}\n원문: {body}"
-    )
+    if mode == "delta":
+        instruction = (
+            "다음은 한국 상장사의 DART 기재정정 공시 원문이다. 정정 전과 정정 후를 "
+            "비교해 무엇이 어떻게 바뀌었는지만 1~2줄로 요약하라 (예: 계약금액 "
+            "100억→120억, 납입일 연기 등). 바뀐 항목과 수치를 구체적으로. 변동 "
+            "내용을 찾을 수 없으면 정확히 '변동파악불가' 네 글자만 답하라. "
+            "한국어 평문으로만 답하고 머리기호나 마크다운은 쓰지 마라.\n\n"
+        )
+    else:
+        instruction = (
+            "다음은 한국 상장사의 DART 공시 원문이다. 투자자 관점에서 핵심만 2~3줄로 "
+            "요약하라. 금액·수량·당사자·사유·일정 등 구체 정보를 우선하고, 과장이나 "
+            "해석 없이 사실만. 기재정정이면 무엇이 어떻게 바뀌었는지를 중심으로. "
+            "한국어 평문으로만 답하고 머리기호나 마크다운은 쓰지 마라.\n\n"
+        )
+    prompt = instruction + f"공시 제목: {title}\n원문: {body}"
     models = [_gemini_model_ok] if _gemini_model_ok else _GEMINI_MODELS
     for model in models:
         try:
@@ -61,10 +72,11 @@ def _llm_summary(title: str, dart_key: str, rcept_no: str) -> str | None:
                 print(f"[Gemini] HTTP {r.status_code}: {r.text[:120]}")
                 return None
             out = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-            if not out:
+            if not out or "변동파악불가" in out:
                 return None
             _gemini_model_ok = model
-            return "🤖 " + esc(out[:600])
+            prefix = "🤖 정정: " if mode == "delta" else "🤖 "
+            return prefix + esc(out[:600])
         except Exception as e:
             print(f"[Gemini] {type(e).__name__}: {e}")
             return None
@@ -707,6 +719,36 @@ def _sum_rights_doc(api_key: str, rcept_no: str, code: str) -> str | None:
     return out
 
 
+def _sum_dividend(api_key: str, rcept_no: str, ctx: dict | None = None) -> str | None:
+    """현금ㆍ현물배당결정 — 1주당 배당금·시가배당률·총액·기준일·지급일"""
+    text = _doc_text(api_key, rcept_no)
+    kind = (re.search(r"배당구분\s*(\S+)", text) or [None, ""])[1]
+    per = _num((re.search(r"1주당\s*배당금\s*\(원\)\s*보통주식\s*([\d,\-]+)", text) or [None, None])[1])
+    yld = _num((re.search(r"시가배당[율률]\s*\(%\)\s*보통주식\s*([\d.,\-]+)", text) or [None, None])[1])
+    total = _num((re.search(r"배당금총액\s*\(원\)\s*([\d,\-]+)", text) or [None, None])[1])
+    record = (re.search(r"배당기준일\s*(\d{4}-\d{2}-\d{2})", text) or [None, None])[1]
+    pay = (re.search(r"지급\s*예정일자?\s*(\d{4}-\d{2}-\d{2})", text) or [None, None])[1]
+    if per is None and total is None:
+        return None
+    lines = []
+    line = ""
+    if per is not None:
+        line = f"1주당 {per:,.0f}원"
+        if yld is not None:
+            line += f" (시가배당률 {yld:.2f}%)"
+        if kind:
+            line += f" · {esc(kind)}"
+    if line:
+        lines.append(line)
+    if total is not None:
+        lines.append(f"배당금총액 {_eok(total)}")
+    dates = [s for s in (f"기준일 {record}" if record else "",
+                         f"지급 {pay}" if pay else "") if s]
+    if dates:
+        lines.append(" · ".join(dates))
+    return "\n".join(lines) if lines else None
+
+
 def _sum_earnings(api_key: str, rcept_no: str, ctx: dict | None = None) -> str | None:
     text = _doc_text(api_key, rcept_no)
     unit = _detect_unit_won(text)
@@ -791,6 +833,7 @@ DOC_SUMMARIZERS: dict[str, tuple[object, str, str]] = {
     "repricing": (_sum_repricing, "리픽싱요약", "⚠️"),
     "asset": (_sum_asset, "자산양수도요약", "🚨"),
     "exercise": (_sum_exercise, "행사요약", "⚠️"),
+    "dividend": (_sum_dividend, "배당요약", "💰"),
 }
 
 
@@ -809,6 +852,8 @@ def doc_kind(title: str) -> str | None:
         return "asset"
     if re.search(r"(전환청구권|신주인수권|교환청구권)행사", t):
         return "exercise"
+    if re.search(r"배당결정", t):
+        return "dividend"
     return None
 
 
@@ -873,6 +918,11 @@ def summarize(item: dict, api_key: str) -> str | None:
     except Exception as e:
         print(f"[요약 실패] {rcept_no} {title[:30]}: {type(e).__name__}: {e}")
     if _informative(result):
+        # 기재정정은 "무엇이 바뀌었는지"가 핵심 — 규칙 요약에 변동 내역을 덧붙인다
+        if "기재정정" in title:
+            delta = _llm_summary(title, api_key, rcept_no, mode="delta")
+            if delta:
+                result += "\n" + delta
         return result
     # 규칙 파싱이 없거나 실패한 공시(철회·정정·합병·소송 등) — Gemini 폴백
     return _llm_summary(title, api_key, rcept_no)
