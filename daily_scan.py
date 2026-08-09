@@ -257,6 +257,10 @@ def krx_login_diag() -> str | None:
 def scan_short(base_dd: str, watch: dict[str, str]) -> tuple[list[str], str | None]:
     if not watch:
         return [], "관심종목 없음"
+    if not (os.environ.get("KRX_ID") and os.environ.get("KRX_PW")):
+        # 2026-08 KRX가 로그인에 nProtect 암호화를 도입해 봇 로그인이 막힘(CD006).
+        # 실패 시도가 쌓이면 계정이 잠기므로 시크릿을 빼고 이 섹션은 휴면 처리.
+        return [], "휴면 — KRX 로그인 자동화 중단(사이트 보안정책 변경)"
     diag = krx_login_diag()
     if diag:
         return [], f"KRX 로그인 불가: {diag}"
@@ -385,7 +389,11 @@ def main() -> None:
     except Exception as e:
         sections.append(f"\n⚠️ 신용잔고 조회 실패: {type(e).__name__}: {str(e)[:100]}")
 
-    tg_send_long("\n".join(sections))
+    msg = "\n".join(sections)
+    if os.environ.get("DRY_RUN"):
+        print("DRY_RUN — 텔레그램 발송·상태 저장 생략. 메시지 미리보기:\n" + msg)
+        return
+    tg_send_long(msg)
     state["last_scanned"] = base_dd
     save_state(STATE_FILE, state)
     print("발송 완료")

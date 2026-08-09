@@ -84,8 +84,8 @@ jobs:
       - name: Run daily scan
         env:
           KRX_AUTH_KEY: ${{ secrets.KRX_AUTH_KEY }}
-          KRX_ID: ${{ secrets.KRX_ID }}
-          KRX_PW: ${{ secrets.KRX_PW }}
+          # KRX_ID/KRX_PW 제거 (2026-08): data.krx.co.kr가 nProtect 암호화 로그인으로 전환되어
+          # 봇 로그인이 CD006으로 거절됨 → 시도 누적 시 계정 잠금. 공매도 섹션은 휴면.
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           WATCHLIST: ${{ secrets.WATCHLIST }}
