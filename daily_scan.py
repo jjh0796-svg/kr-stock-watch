@@ -335,6 +335,21 @@ def scan_credit() -> str | None:
             f" 기준일 {date[4:6]}/{date[6:]}")
 
 
+# ─── 7) pykrx 신버전 감시 ──────────────────────────────────────────────────────
+# KRX가 로그인에 nProtect 암호화를 도입해(2026-08) pykrx 로그인이 막혔다.
+# 보완 버전이 나오면 공매도 섹션 부활을 검토할 수 있게 PyPI 배포를 감시한다.
+# 새 버전이 나와도 자동 복귀는 하지 않는다 — 로그인 우회 방식이면 계정 잠금 재발 위험.
+
+def check_pykrx_release(state: dict) -> str | None:
+    r = requests.get("https://pypi.org/pypi/pykrx/json", timeout=15)
+    latest = r.json()["info"]["version"]
+    seen = state.get("pykrx_seen_version")
+    state["pykrx_seen_version"] = latest
+    if seen and latest != seen:
+        return latest
+    return None
+
+
 # ─── 조립 ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -388,6 +403,14 @@ def main() -> None:
         sections.append("\n💳 <b>신용융자 잔고</b> (KOFIA)\n" + (credit or " • 데이터 없음"))
     except Exception as e:
         sections.append(f"\n⚠️ 신용잔고 조회 실패: {type(e).__name__}: {str(e)[:100]}")
+
+    try:
+        new_ver = check_pykrx_release(state)
+        if new_ver:
+            sections.append(f"\n🔔 <b>pykrx {new_ver} 배포 감지</b>\n"
+                            " • KRX 로그인(nProtect) 대응 여부 확인 후 공매도 섹션 부활 검토")
+    except Exception:
+        pass
 
     msg = "\n".join(sections)
     if os.environ.get("DRY_RUN"):
