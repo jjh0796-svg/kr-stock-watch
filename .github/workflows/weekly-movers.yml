@@ -1,0 +1,48 @@
+name: Weekly Movers
+on:
+  schedule:
+    # KST 토요일 07:20 예약 → 실행 지연 감안 실제 ~07:45 (미국 금요일 마감 반영)
+    - cron: "20 22 * * 5"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "텔레그램 발송 없이 실행"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  movers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install yfinance
+
+      - name: Run weekly movers
+        env:
+          KRX_AUTH_KEY: ${{ secrets.KRX_AUTH_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          DRY_RUN: ${{ inputs.dry_run == true && '1' || '' }}
+        run: python weekly_movers.py
+
+      - name: Commit name cache
+        run: |
+          git config user.name "movers-bot"
+          git config user.email "actions@github.com"
+          git add data/movers_names.json 2>/dev/null || true
+          git diff --cached --quiet || (git commit -m "chore: update movers name cache [skip ci]" && git push)
