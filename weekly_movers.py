@@ -213,8 +213,6 @@ def main() -> None:
         sections.append(fmt_section("🇪🇺 Europe (주요지수)", eu, cache))
     if jp:
         sections.append(fmt_section("🇯🇵 Japan (닛케이225)", jp, cache))
-    sections.append("\n<i>해외는 지수 구성종목 기준 · 설명은 AI 생성 참고용</i>")
-
     msg = "\n".join(sections)
     if os.environ.get("DRY_RUN"):
         print("DRY_RUN — 발송 생략. 미리보기:\n" + msg)
