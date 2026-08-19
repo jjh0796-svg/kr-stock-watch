@@ -386,7 +386,17 @@ def main() -> None:
     watch = effective_watchlist()  # 시드 + 텔레그램 /추가·/삭제 반영본
     state = load_state(STATE_FILE, {})
 
-    base_dd, rows = find_base_date()
+    # 새 기준일 데이터가 아직 안 올라온 시각이면 5분 간격으로 잠시 기다린다
+    # (아침 슬롯이 KRX OpenAPI 게시보다 먼저 시작해도 놓치지 않게)
+    wait_tries = int(os.environ.get("DATA_WAIT_TRIES", "6"))
+    base_dd, rows = None, None
+    for attempt in range(wait_tries):
+        base_dd, rows = find_base_date()
+        if base_dd and (state.get("last_scanned") != base_dd or os.environ.get("FORCE_RESCAN")):
+            break
+        print(f"새 기준일 데이터 대기 ({attempt + 1}/{wait_tries}) — 5분 후 재확인"
+              f" (현재 최신: {base_dd or '없음'})")
+        time.sleep(300)
     if not base_dd:
         print("최근 거래일 데이터를 찾지 못함 — 종료")
         return

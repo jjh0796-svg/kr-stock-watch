@@ -21,9 +21,11 @@ on:
         type: string
         default: "manual"
   schedule:
-    # 개장 전 브리핑으로 이동 (2026-08-19, 사용자 요청) — 전일 마감 데이터를 아침에 정리
-    - cron: "50 22 * * 0-4"  # KST 07:50 본 실행 (전일 기준)
-    - cron: "40 23 * * 0-4"  # KST 08:40 백업 (본 실행 실패·지연 시, 기준일 중복 방지 상태로 스킵)
+    # 개장 전 브리핑으로 이동 (2026-08-19, 사용자 요청) — 전일 마감 데이터를 아침에 정리.
+    # 이 repo의 GitHub cron은 20~35분 지연 시작이 관례라 그만큼 당겨서 예약한다.
+    # (기존 19:05 저녁 본실행은 KRX OpenAPI에 당일 데이터가 없어 항상 헛돌았음 — 폐지)
+    - cron: "30 22 * * 0-4"  # KST 07:30 예약 → 실제 ~07:50 시작, 데이터 대기 루프 포함
+    - cron: "30 23 * * 0-4"  # KST 08:30 예약 백업 (본 실행이 놓친 날만, 상태로 중복 방지)
 
 concurrency:
   group: daily-scan
@@ -32,7 +34,7 @@ concurrency:
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Check out repository
