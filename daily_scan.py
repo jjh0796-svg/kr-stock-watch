@@ -5,8 +5,9 @@
 #   6) 신용융자 잔고 추이 (금융투자협회 KOFIA)
 #   7) 52주 신고가/신저가 돌파 + 거래량 (KRX OpenAPI + 다음증권 52주 고저)
 #
-# 스케줄: 평일 19시대 실행. KRX OpenAPI에 당일 데이터가 아직 없으면
-#   다음날 아침 백업 실행이 전일 기준으로 처리(기준일 중복실행 방지 상태 보관).
+# 스케줄: 평일 아침 07:50 실행 (전일 마감 데이터 기준, 개장 전 브리핑).
+#   08:40 백업 슬롯은 본 실행 실패 시에만 동작(기준일 중복실행 방지 상태 보관).
+#   + 투자자별 순매수 상위(코스피/코스닥 × 외인/기관 톱3, 수량×종가 근사)
 # ==========================================
 import os
 import re
@@ -45,12 +46,15 @@ def eok(v: float) -> str:
 def krx_daily(bas_dd: str) -> list[dict]:
     """KOSPI+KOSDAQ 전종목 일별 시세. 휴장일이면 빈 목록."""
     rows: list[dict] = []
-    for api in ("stk_bydd_trd", "ksq_bydd_trd"):
+    for api, mkt in (("stk_bydd_trd", "코스피"), ("ksq_bydd_trd", "코스닥")):
         r = requests.get(KRX_STO_URL.format(api=api), params={"basDd": bas_dd},
                          headers={"AUTH_KEY": KRX_AUTH_KEY, "Accept": "application/json"},
                          timeout=25)
         r.raise_for_status()
-        rows.extend(r.json().get("OutBlock_1", []))
+        batch = r.json().get("OutBlock_1", [])
+        for b in batch:
+            b["_mkt"] = mkt
+        rows.extend(batch)
         time.sleep(0.4)
     # 휴장일엔 시가/고가/저가가 전부 0으로 오는 경우가 있어 걸러낸다
     if rows and all(float(x.get("TDD_HGPRC", "0").replace(",", "") or 0) == 0 for x in rows[:50]):
@@ -178,20 +182,21 @@ def naver_trend(code: str, size: int = 10) -> list[dict]:
     return d if isinstance(d, list) else []
 
 
-def scan_flow(base_dd: str, rows: list[dict]) -> tuple[list[str], str]:
+def scan_flow(base_dd: str, rows: list[dict]) -> tuple[list[str], str, list[str]]:
     universe = []
     for row in rows:
         name = row.get("ISU_NM", "")
         code = row.get("ISU_CD", "")
         val = float(row.get("ACC_TRDVAL", "0").replace(",", "") or 0)
         if code and not EXCLUDE_NAME_RE.search(name):
-            universe.append((val, code, name))
+            universe.append((val, code, name, row.get("_mkt", "")))
     universe.sort(key=lambda x: -x[0])
     universe = universe[:FLOW_UNIVERSE]
 
     results: list[tuple[float, str]] = []
+    snapshots: list[dict] = []  # 기준일 당일 종목별 외인/기관 순매수 (순매수 상위용)
     flow_date = None
-    for _, code, name in universe:
+    for _, code, name, mkt in universe:
         try:
             trend = naver_trend(code)
         except Exception:
@@ -202,6 +207,17 @@ def scan_flow(base_dd: str, rows: list[dict]) -> tuple[list[str], str]:
         latest = trend[0]
         if flow_date is None:
             flow_date = latest.get("bizdate")
+        close0 = _num(latest.get("closePrice"))
+        if latest.get("bizdate") == flow_date and close0:
+            pct = None
+            if len(trend) > 1 and _num(trend[1].get("closePrice")):
+                prev_close = _num(trend[1].get("closePrice"))
+                pct = (close0 - prev_close) / prev_close * 100
+            snapshots.append({
+                "mkt": mkt, "name": name, "pct": pct,
+                "f_val": _num(latest.get("foreignerPureBuyQuant")) * close0,
+                "o_val": _num(latest.get("organPureBuyQuant")) * close0,
+            })
         streak, acc_value = 0, 0.0
         for t in trend:
             fq = _num(t.get("foreignerPureBuyQuant"))
@@ -220,7 +236,19 @@ def scan_flow(base_dd: str, rows: list[dict]) -> tuple[list[str], str]:
     note = ""
     if flow_date and flow_date != base_dd:
         note = f" (수급 기준일 {flow_date[4:6]}/{flow_date[6:]})"
-    return [s for _, s in results[:15]], note
+
+    top_lines: list[str] = []
+    for mkt in ("코스피", "코스닥"):
+        for key, inv in (("f_val", "외국인"), ("o_val", "기관")):
+            ranked = sorted((s for s in snapshots if s["mkt"] == mkt and s[key] > 0),
+                            key=lambda s: -s[key])[:3]
+            picks = []
+            for s in ranked:
+                pct_txt = f"({s['pct']:+.1f}%)" if s["pct"] is not None else ""
+                picks.append(f"{esc(s['name'])} +{eok(s[key])}{pct_txt}")
+            if picks:
+                top_lines.append(f" • [{mkt}·{inv}] " + " · ".join(picks))
+    return [s for _, s in results[:15]], note, top_lines
 
 
 # ─── 5) 공매도 급증 — 관심종목 (pykrx, KRX 로그인 필요) ────────────────────────
@@ -382,7 +410,11 @@ def main() -> None:
         sections.append(f"\n⚠️ 52주 스캔 실패: {type(e).__name__}: {str(e)[:100]}")
 
     try:
-        flows, note = scan_flow(base_dd, rows)
+        flows, note, flow_top = scan_flow(base_dd, rows)
+        if flow_top:
+            sections.append(f"\n💰 <b>투자자별 순매수 상위</b>{note}\n"
+                            + "\n".join(flow_top)
+                            + "\n <i>(순매수액은 수량×종가 환산 근사)</i>")
         sections.append(f"\n🤝 <b>외국인 {FLOW_STREAK}일↑ 연속 순매수 + 기관 동반</b>"
                         f" (거래대금 상위 {FLOW_UNIVERSE}){note}\n"
                         + ("\n".join(flows) if flows else " • 해당 없음"))
