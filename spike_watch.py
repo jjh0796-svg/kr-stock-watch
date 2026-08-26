@@ -78,6 +78,12 @@ def read_watchlist():
             parts = line.split(",")
             if len(parts) >= 2 and parts[0].strip().isdigit():
                 out[parts[0].strip()] = parts[1].strip()
+    # 비공개 관심종목: env WATCHLIST="005930:삼성전자,000660:SK하이닉스" (daily_scan과 동일 형식)
+    for item in os.environ.get("WATCHLIST", "").split(","):
+        if ":" in item:
+            code, _, name = item.strip().partition(":")
+            if code.strip().isdigit():
+                out[code.strip()] = name.strip()
     return out
 
 
