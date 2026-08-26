@@ -90,8 +90,10 @@ jobs:
           KRX_AUTH_KEY: ${{ secrets.KRX_AUTH_KEY }}
           # KRX_ID/KRX_PW 제거 (2026-08): data.krx.co.kr가 nProtect 암호화 로그인으로 전환되어
           # 봇 로그인이 CD006으로 거절됨 → 시도 누적 시 계정 잠금. 공매도 섹션은 휴면.
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # 마감 스캔은 "안녕하재 증시데이터" 봇으로 발송 (2026-08 채널 재편).
+          # MARKET_DATA_* 시크릿 미등록 시 기존 종목모니터링 봇으로 폴백.
+          TELEGRAM_BOT_TOKEN: ${{ secrets.MARKET_DATA_BOT_TOKEN || secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.MARKET_DATA_CHAT_ID || secrets.TELEGRAM_CHAT_ID }}
           WATCHLIST: ${{ secrets.WATCHLIST }}
           DRY_RUN: ${{ inputs.dry_run == true && '1' || '' }}
           FORCE_RESCAN: ${{ inputs.force_rescan == true && '1' || '' }}
