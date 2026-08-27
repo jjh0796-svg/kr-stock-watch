@@ -34,7 +34,7 @@ concurrency:
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 95  # 데이터 대기 최대 70분(DATA_WAIT_TRIES=14) + 스캔 여유
 
     steps:
       - name: Check out repository
@@ -97,6 +97,10 @@ jobs:
           WATCHLIST: ${{ secrets.WATCHLIST }}
           DRY_RUN: ${{ inputs.dry_run == true && '1' || '' }}
           FORCE_RESCAN: ${{ inputs.force_rescan == true && '1' || '' }}
+          # KRX OpenAPI의 전일 데이터 게시가 08시를 넘는 날 발견(2026-08-28 —
+          # 07:30 실행이 30분 대기 후 빈손 종료, 미발송). 5분×14회 = 최대 08:40대까지 대기.
+          # 공개 repo라 러너 분은 무제한 — 대기 낭비 무해.
+          DATA_WAIT_TRIES: "14"
         run: python daily_scan.py
 
       - name: Save scan state
