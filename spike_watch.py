@@ -227,14 +227,20 @@ def tick():
                 need = (last_alert_price is None or
                         abs(price / last_alert_price - 1) * 100 >= CHG_5MIN)
                 if abs(chg5) >= CHG_5MIN and need:
-                    line = (f"{tag} {name} {rate:+.1f}% (5분 {chg5:+.1f}%) "
-                            f"{price:,.0f}원")
+                    # 섹션은 "5분 변동" 기준 — 당일과 방향이 다르면 반전 표시
+                    flip = ""
+                    if chg5 > 0 > rate:
+                        flip = " ↗반등중"
+                    elif chg5 < 0 < rate:
+                        flip = " ↘반락중"
+                    line = (f"{tag} {name} 5분 {chg5:+.1f}% · "
+                            f"당일 {rate:+.1f}%{flip} · {price:,.0f}원")
                     (ups if chg5 > 0 else downs).append((abs(chg5), line))
                     mark(code, "t1", price)
 
         # T1b: 등락 상위 최초 진입 (±7% 이상) — 방향은 당일 등락 기준
         if code in ranked and abs(rate) >= CHG_ENTRY and not s.get("entry"):
-            line = f"{tag} {name} {rate:+.1f}% (상위진입) {price:,.0f}원"
+            line = f"{tag} {name} 당일 {rate:+.1f}% 상위진입 · {price:,.0f}원"
             (ups if rate > 0 else downs).append((abs(rate), line))
             mark(code, "entry")
 
@@ -271,8 +277,8 @@ def tick():
     total = len(ups) + len(downs) + len(others)
     if total:
         send([f"📡 스파이크 {ts}"]
-             + section("🔴 급등", ups, 8)
-             + section("🔵 급락", downs, 8)
+             + section("🔴 급등 신호 (5분/진입)", ups, 8)
+             + section("🔵 급락 신호 (5분/진입)", downs, 8)
              + section("📢 거래량·52주 (⭐관심종목)", others, 6))
         print(f"{ts} 알림 {total}건")
 
