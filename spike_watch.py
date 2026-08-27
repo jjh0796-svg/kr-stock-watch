@@ -84,6 +84,15 @@ def read_watchlist():
             code, _, name = item.strip().partition(":")
             if code.strip().isdigit():
                 out[code.strip()] = name.strip()
+    # 대화형 봇(watch_bot)이 관리하는 동적 관심종목 파일 ("코드,이름" 줄 단위)
+    wf = Path(os.environ.get("WATCHLIST_FILE",
+                             str(Path.home() / "bots" / "watchlist.csv")))
+    if wf.exists():
+        for line in wf.read_text(encoding="utf-8-sig").splitlines():
+            if "," in line:
+                code, _, name = line.partition(",")
+                if code.strip().isdigit():
+                    out[code.strip()] = name.strip()
     return out
 
 
