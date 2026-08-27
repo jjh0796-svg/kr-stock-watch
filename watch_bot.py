@@ -75,12 +75,16 @@ def resolve_name(code):
 
 
 HELP = (
-    "📋 관심종목 관리 명령\n"
-    "/추가 005930 — 코드로 추가 (이름 자동)\n"
-    "/추가 005930 삼성전자 — 이름 지정\n"
-    "/삭제 005930\n"
-    "/목록 — 현재 관심종목\n"
-    "관심종목은 장중 스파이크 감시(거래량 폭증·52주 신고저)에 바로 반영됩니다."
+    "📋 스파이크 감시 종목 관리\n"
+    "/스파이크추가 005930 — 코드로 추가 (이름 자동, /추가 도 동일)\n"
+    "/스파이크추가 005930 삼성전자 — 이름 지정\n"
+    "/스파이크삭제 005930\n"
+    "/스파이크목록\n"
+    "\n"
+    "※ 이 목록은 **장중 스파이크 감시 전용**입니다\n"
+    "  (거래량 폭증·52주 신고저 — 시장 전체 급등락 감시는 목록과 무관하게 항상 작동)\n"
+    "※ DART 공시감시·마감스캔 대상 종목은 별개로, 깃헙 kr-stock-watch의\n"
+    "  WATCHLIST 설정에서 관리됩니다 (변경은 클로드에게 요청)"
 )
 
 
@@ -94,9 +98,9 @@ def handle(text):
     if cmd in ("start", "도움말", "help"):
         return HELP
 
-    if cmd in ("추가", "add"):
+    if cmd in ("추가", "스파이크추가", "add"):
         if len(parts) < 2 or not parts[1].isdigit() or len(parts[1]) != 6:
-            return "형식: /추가 종목코드6자리 [이름]"
+            return "형식: /스파이크추가 종목코드6자리 [이름]"
         code = parts[1]
         name = " ".join(parts[2:]) if len(parts) > 2 else resolve_name(code)
         if not name:
@@ -106,7 +110,7 @@ def handle(text):
         save_wl(wl)
         return f"✅ 추가됨: {name}({code}) — 총 {len(wl)}종목"
 
-    if cmd in ("삭제", "제거", "del", "remove"):
+    if cmd in ("삭제", "스파이크삭제", "제거", "del", "remove"):
         if len(parts) < 2:
             return "형식: /삭제 종목코드"
         code = parts[1]
@@ -117,12 +121,12 @@ def handle(text):
             return f"🗑 삭제됨: {name}({code}) — 총 {len(wl)}종목"
         return f"목록에 없는 코드입니다: {code}"
 
-    if cmd in ("목록", "list"):
+    if cmd in ("목록", "스파이크목록", "list"):
         wl = read_wl()
         if not wl:
-            return "관심종목이 비어 있습니다. /추가 로 등록하세요."
+            return "스파이크 감시 종목이 비어 있습니다. /스파이크추가 로 등록하세요."
         lines = [f"· {n}({c})" for c, n in sorted(wl.items())]
-        return f"📋 관심종목 {len(wl)}종목\n" + "\n".join(lines)
+        return f"📋 스파이크 감시 {len(wl)}종목\n" + "\n".join(lines)
 
     return None  # 모르는 명령은 무시 (다른 봇 메시지와 혼선 방지)
 
