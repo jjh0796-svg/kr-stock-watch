@@ -202,7 +202,7 @@ def tick():
     universe = set(wl) | set(ranked)
     quotes = fetch_quotes(universe)
 
-    alerts = []
+    ups, downs, others = [], [], []   # (정렬키, 줄) — 🔴급등/🔵급락/📢거래량·52주
 
     def mark(code, kind, extra=None):
         sent.setdefault(code, {})[kind] = extra if extra is not None else True
@@ -218,7 +218,7 @@ def tick():
 
         s = sent.get(code, {})
 
-        # T1: 5분 급변
+        # T1: 5분 급변 — 방향은 5분 변동 기준
         if len(h) >= 6:
             base = h[-6][1]
             if base > 0:
@@ -227,42 +227,54 @@ def tick():
                 need = (last_alert_price is None or
                         abs(price / last_alert_price - 1) * 100 >= CHG_5MIN)
                 if abs(chg5) >= CHG_5MIN and need:
-                    alerts.append(f"{tag}⚡ {name}({code}) 5분 {chg5:+.1f}% → "
-                                  f"{price:,.0f}원 (당일 {rate:+.1f}%)")
+                    line = (f"{tag} {name} {rate:+.1f}% (5분 {chg5:+.1f}%) "
+                            f"{price:,.0f}원")
+                    (ups if chg5 > 0 else downs).append((abs(chg5), line))
                     mark(code, "t1", price)
 
-        # T1b: 등락 상위 최초 진입 (±7% 이상)
+        # T1b: 등락 상위 최초 진입 (±7% 이상) — 방향은 당일 등락 기준
         if code in ranked and abs(rate) >= CHG_ENTRY and not s.get("entry"):
-            arrow = "🔺" if rate > 0 else "🔻"
-            alerts.append(f"{tag}{arrow} {name}({code}) 등락 상위 진입 "
-                          f"{rate:+.1f}% → {price:,.0f}원")
+            line = f"{tag} {name} {rate:+.1f}% (상위진입) {price:,.0f}원"
+            (ups if rate > 0 else downs).append((abs(rate), line))
             mark(code, "entry")
 
         # 워치리스트 전용 트리거
         p = prep_cache.get(code)
         if p and code in wl:
-            # T2: 거래량 폭증
+            # T2: 거래량 폭증 (당일 등락을 색으로 병기)
             if (p["avg20_vol"] > 0 and q["volume"] >= VOL_MULT * p["avg20_vol"]
                     and not s.get("t2")):
                 mult = q["volume"] / p["avg20_vol"]
-                alerts.append(f"⭐📢 {name}({code}) 거래량 20일평균 x{mult:.1f} "
-                              f"({rate:+.1f}%)")
+                dot = "🔴" if rate > 0 else ("🔵" if rate < 0 else "⚪")
+                others.append((mult, f"⭐ {name} 거래량 x{mult:.1f} {dot}{rate:+.1f}%"))
                 mark(code, "t2")
             # T3: 52주 신고/신저
             if price >= p["high52"] and not s.get("t3h"):
-                alerts.append(f"⭐🚀 {name}({code}) 52주 신고가 {price:,.0f}원")
+                others.append((999, f"🚀 {name} 52주 신고가 {price:,.0f}원"))
                 mark(code, "t3h")
             if price <= p["low52"] and not s.get("t3l"):
-                alerts.append(f"⭐🧊 {name}({code}) 52주 신저가 {price:,.0f}원")
+                others.append((999, f"🧊 {name} 52주 신저가 {price:,.0f}원"))
                 mark(code, "t3l")
 
     save_json(STATE_DIR / f"intraday_{day}.json", hist)
     save_json(STATE_DIR / f"sent_{day}.json", sent)
 
-    if alerts:
-        send([f"📡 스파이크 감시 {ts}"] + alerts[:15]
-             + ([f"… 외 {len(alerts)-15}건"] if len(alerts) > 15 else []))
-        print(f"{ts} 알림 {len(alerts)}건")
+    def section(title, items, n):
+        if not items:
+            return []
+        items = sorted(items, key=lambda x: -x[0])
+        lines = ["", title] + [l for _, l in items[:n]]
+        if len(items) > n:
+            lines.append(f"… 외 {len(items)-n}건")
+        return lines
+
+    total = len(ups) + len(downs) + len(others)
+    if total:
+        send([f"📡 스파이크 {ts}"]
+             + section("🔴 급등", ups, 8)
+             + section("🔵 급락", downs, 8)
+             + section("📢 거래량·52주 (⭐관심종목)", others, 6))
+        print(f"{ts} 알림 {total}건")
 
 
 def main():
