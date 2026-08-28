@@ -169,6 +169,22 @@ def in_session(now):
     return datetime.time(9, 5) <= t <= datetime.time(15, 30)
 
 
+def log_signal(code, name, direction, note):
+    """알림 성과 자동 평가용 신호 기록 (CODEX signal_scorecard가 주간 채점).
+    실패해도 알림에 영향 없도록 전부 삼킨다."""
+    try:
+        path = Path(os.environ.get("SIGNAL_LOG_FILE",
+                                   str(Path.home() / "bots" / "signals.jsonl")))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        entry = {"ts": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+                 "bot": "spike", "code": code, "name": name[:40],
+                 "dir": direction, "note": note[:120]}
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
 def send(lines):
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat = os.environ.get("TELEGRAM_CHAT_ID")
@@ -203,6 +219,7 @@ def tick():
     quotes = fetch_quotes(universe)
 
     ups, downs, others = [], [], []   # (정렬키, 줄) — 🔴급등/🔵급락/📢거래량·52주
+    sigs = []                          # (code, name, dir, note) — 성과 채점용
 
     def mark(code, kind, extra=None):
         sent.setdefault(code, {})[kind] = extra if extra is not None else True
@@ -236,12 +253,14 @@ def tick():
                     line = (f"{tag} {name} 5분 {chg5:+.1f}% · "
                             f"당일 {rate:+.1f}%{flip} · {price:,.0f}원")
                     (ups if chg5 > 0 else downs).append((abs(chg5), line))
+                    sigs.append((code, name, "up" if chg5 > 0 else "down", f"5분 {chg5:+.1f}%"))
                     mark(code, "t1", price)
 
         # T1b: 등락 상위 최초 진입 (±7% 이상) — 방향은 당일 등락 기준
         if code in ranked and abs(rate) >= CHG_ENTRY and not s.get("entry"):
             line = f"{tag} {name} 당일 {rate:+.1f}% 상위진입 · {price:,.0f}원"
             (ups if rate > 0 else downs).append((abs(rate), line))
+            sigs.append((code, name, "up" if rate > 0 else "down", f"상위진입 {rate:+.1f}%"))
             mark(code, "entry")
 
         # 워치리스트 전용 트리거
@@ -257,9 +276,11 @@ def tick():
             # T3: 52주 신고/신저
             if price >= p["high52"] and not s.get("t3h"):
                 others.append((999, f"🚀 {name} 52주 신고가 {price:,.0f}원"))
+                sigs.append((code, name, "up", "52주 신고가"))
                 mark(code, "t3h")
             if price <= p["low52"] and not s.get("t3l"):
                 others.append((999, f"🧊 {name} 52주 신저가 {price:,.0f}원"))
+                sigs.append((code, name, "down", "52주 신저가"))
                 mark(code, "t3l")
 
     save_json(STATE_DIR / f"intraday_{day}.json", hist)
@@ -280,6 +301,8 @@ def tick():
              + section("🔴 급등 신호 (5분/진입)", ups, 8)
              + section("🔵 급락 신호 (5분/진입)", downs, 8)
              + section("📢 거래량·52주 (⭐관심종목)", others, 6))
+        for code, name, direction, note in sigs:
+            log_signal(code, name, direction, note)
         print(f"{ts} 알림 {total}건")
 
 
