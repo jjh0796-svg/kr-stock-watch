@@ -159,7 +159,7 @@ def daum_search(query: str) -> list[tuple[str, str]]:
 
 HELP_TEXT = (
     "📢 <b>공시모니터링 봇 사용법</b> — DART 공시 실시간 감시 전용\n"
-    "(💼 보유·⭐ 주가 스파이크 등록은 '종목모니터링' 봇에서: /hold·/spike)\n\n"
+    "(💼 보유·⭐ 주가 스파이크는 종목모니터링 봇 @companymonitor_0796_bot 에서)\n\n"
     "/추가 005930 또는 /추가 에프에스티 — 관심종목 추가 (이름·코드 자동 매칭)\n"
     "/삭제 005930 또는 /삭제 에프에스티 — 관심종목 제외\n"
     "/목록 — 현재 관심종목·설정 보기\n"
@@ -182,6 +182,14 @@ def types_off(cfg: dict) -> set[str]:
 def handle_command(text: str, cfg: dict) -> str | None:
     parts = text.split()
     cmd = parts[0].lower()
+
+    # 다른 봇 소관 명령은 긴 도움말 대신 짧은 길 안내만 (2026-08-29 채널 혼선 정리)
+    if cmd.lstrip("/") in ("hold", "holds", "hold_del", "spike", "spikes", "spike_del",
+                           "보유", "보유추가", "보유삭제", "보유목록",
+                           "스파이크", "스파이크추가", "스파이크삭제", "스파이크목록"):
+        return ("이 방은 📢 공시감시 전용입니다.\n"
+                "💼 보유·⭐ 스파이크 관리는 종목모니터링 봇에서:\n"
+                "→ @companymonitor_0796_bot")
 
     if cmd in ("/추가", "/add"):
         if len(parts) < 2:
