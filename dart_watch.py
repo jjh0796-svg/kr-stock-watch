@@ -17,9 +17,11 @@
 # DART 호출량: 분당 1~3건 × 하루 약 12시간 ≈ 800~1,000건/일
 #   (같은 키를 쓰는 kr-earnings-pulse ~1.1만 건과 합쳐도 일 한도 2만 건 이내)
 # ==========================================
+import json
 import os
 import re
 import time
+from pathlib import Path
 
 import requests
 
@@ -158,7 +160,11 @@ def daum_search(query: str) -> list[tuple[str, str]]:
 # ─── 텔레그램 명령 처리 ────────────────────────────────────────────────────────
 
 HELP_TEXT = (
-    "🤖 <b>사용법</b>\n"
+    "🤖 <b>사용법</b> — 이 봇의 종목 등록은 목적별로 세 가지입니다\n"
+    "💼 보유(/hold·/보유추가): 전 봇 공용 — 알림 💼 표시·승격\n"
+    "⭐ 주가감시(/spike·/스파이크추가): 장중 급등락·거래량·52주 감시\n"
+    "📢 공시감시(아래 명령): DART 공시 실시간 감시\n\n"
+    "<b>📢 공시감시 명령</b>\n"
     "/추가 005930 또는 /추가 에프에스티 — 관심종목 추가 (이름·코드 자동 매칭)\n"
     "/삭제 005930 또는 /삭제 에프에스티 — 관심종목 제외\n"
     "/목록 — 현재 관심종목·설정 보기\n"
@@ -170,7 +176,8 @@ HELP_TEXT = (
     "/보고자 추가 이름 — 5% 보고 감시 보고자 확대 (기본: 국민연금)\n"
     "/키워드 추가 단어 — 서식 목록에 없는 제목 키워드 직접 추가\n"
     "/키워드 삭제 단어\n\n"
-    "변경은 폴링 주기(약 1분) 안에 적용되고, 장 마감 스캔에도 같은 목록이 쓰입니다."
+    "공시감시 설정 변경은 다음 감시 사이클(최대 15분) 안에 적용되고, "
+    "장 마감 스캔에도 같은 목록이 쓰입니다."
 )
 
 
@@ -371,15 +378,23 @@ def handle_command(text: str, cfg: dict) -> str | None:
 
 
 # 텔레그램 "/" 팝업 메뉴 (봇 명령은 영문만 등록 가능 — 한국어 명령과 병행 동작)
+# 통합 명령 메뉴 (2026-08-29): 목적별 라벨로 구분 — 📢공시감시 / ⭐주가감시 / 💼보유
+# 명령 수신·처리는 서버 watch_bot 허브가 전담하고, 이 목록은 '/' 팝업 안내용이다.
 COMMAND_MENU = [
-    ("list", "관심종목·설정 보기 (=/목록)"),
-    ("co", "기업 카드 — 뒤에 이름이나 코드 (=/기업)"),
-    ("types", "감시 공시 서식 보기·켜기/끄기 (=/유형)"),
-    ("all", "전 종목 구독 관리 (=/전체)"),
-    ("add", "종목 추가 — 뒤에 이름이나 코드 (=/추가)"),
-    ("remove", "종목 제외 (=/삭제)"),
-    ("keyword", "감시 키워드 추가/삭제 (=/키워드)"),
-    ("help", "사용법 안내"),
+    ("hold", "💼 보유 추가 — 전 봇 마킹·알림 승격 (=/보유추가)"),
+    ("holds", "💼 보유 목록 (=/보유목록)"),
+    ("hold_del", "💼 보유 삭제 (=/보유삭제)"),
+    ("add", "📢 공시감시 종목 추가 — 이름·코드 (=/추가)"),
+    ("remove", "📢 공시감시 종목 제외 (=/삭제)"),
+    ("list", "📢 공시감시 종목·설정 보기 (=/목록)"),
+    ("types", "📢 감시 공시 서식 켜기/끄기 (=/유형)"),
+    ("all", "📢 서식 전 종목 구독 관리 (=/전체)"),
+    ("keyword", "📢 감시 키워드 추가/삭제 (=/키워드)"),
+    ("spike", "⭐ 주가 스파이크 감시 추가 (=/스파이크추가)"),
+    ("spikes", "⭐ 주가 스파이크 목록 (=/스파이크목록)"),
+    ("spike_del", "⭐ 주가 스파이크 삭제 (=/스파이크삭제)"),
+    ("co", "🔎 기업 카드 — 이름·코드 (=/기업)"),
+    ("help", "사용법 안내 (세 가지 감시 구분)"),
 ]
 
 
@@ -404,37 +419,14 @@ def process_commands(cfg: dict, wait: int = 0) -> bool:
     깨어나 답하므로 감시 시간대에는 명령 응답이 수 초 안에 온다.
     (대기 시간이 DART 폴링 사이의 sleep 역할을 겸한다)
     """
-    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
-    if not token or not chat_id or DRY_RUN:
-        if wait:
-            time.sleep(wait)
-        return False
-    try:
-        r = requests.get(f"https://api.telegram.org/bot{token}/getUpdates",
-                         params={"offset": cfg.get("tg_offset", 0) + 1, "timeout": wait},
-                         timeout=(10, wait + 15))
-        updates = r.json().get("result", [])
-    except Exception as e:
-        print(f"[TG] getUpdates 실패: {e}")
-        time.sleep(min(wait or 5, 10))
-        return False
-
-    changed = False
-    for up in updates:
-        cfg["tg_offset"] = max(cfg.get("tg_offset", 0), up.get("update_id", 0))
-        changed = True  # offset 전진도 저장 대상
-        msg = up.get("message") or up.get("edited_message") or {}
-        if str(msg.get("chat", {}).get("id", "")) != str(chat_id):
-            continue  # 주인 외 무시
-        text = (msg.get("text") or "").strip()
-        if not text:
-            continue
-        reply = handle_command(text, cfg) if text.startswith("/") else HELP_TEXT
-        if reply:
-            tg_send(reply)
-            time.sleep(0.3)
-    return changed
+    # 2026-08-29 개편: 텔레그램 명령 수신은 서버 상주 watch_bot이 전담한다.
+    # (같은 봇 토큰으로 getUpdates를 두 곳에서 쓰면 명령이 복불복으로 유실되는
+    #  충돌이 있었음 — watch_bot이 handle_command를 재사용해 처리하고, 결과 설정을
+    #  watch_config_repo.json으로 커밋하면 다음 실행이 반영한다.)
+    # 이 함수는 폴링 사이 sleep 역할만 남긴다.
+    if wait:
+        time.sleep(wait)
+    return False
 
 
 # ─── DART 폴링 ─────────────────────────────────────────────────────────────────
@@ -663,6 +655,27 @@ def main() -> None:
     if not api_key:
         raise SystemExit("DART_API_KEY 환경변수가 필요합니다")
     cfg = load_watch_config()
+    # 서버 watch_bot(명령 허브)이 커밋한 설정 오버레이 (2026-08-29 명령 통합).
+    # 파일이 없으면 현재 캐시 설정을 부트스트랩 스냅샷으로 남겨(워크플로가 커밋)
+    # 허브가 그 위에서 이어가게 한다. 이후 이 파일의 단일 작성자는 서버 허브다.
+    repo_cfg = Path("watch_config_repo.json")
+    if repo_cfg.exists():
+        try:
+            overlay = json.loads(repo_cfg.read_text(encoding="utf-8"))
+            for key, value in overlay.items():
+                if key != "tg_offset":
+                    cfg[key] = value
+            save_watch_config(cfg)
+        except Exception as e:
+            print(f"[cfg] repo 설정 병합 실패: {e}")
+    else:
+        try:
+            snapshot = {k: v for k, v in cfg.items() if k != "tg_offset"}
+            repo_cfg.write_text(
+                json.dumps(snapshot, ensure_ascii=False, indent=1), encoding="utf-8")
+            print("[cfg] watch_config_repo.json 부트스트랩 생성 (워크플로가 커밋)")
+        except Exception as e:
+            print(f"[cfg] 부트스트랩 실패: {e}")
     print(f"관심종목 {len(merged_watchlist(cfg))}개 | 서식 {len(DISCLOSURE_TYPES)}종"
           f"(꺼짐 {len(types_off(cfg))}) | 보고자 키워드 {FILER_KEYWORDS} "
           f"| 총 {POLL_TOTAL_SECONDS}s, 간격 {POLL_INTERVAL}s")

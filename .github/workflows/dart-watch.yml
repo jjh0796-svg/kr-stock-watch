@@ -2,6 +2,10 @@ name: DART Watch
 
 run-name: DART Watch (${{ inputs.trigger_source || github.event_name }})
 
+# watch_config_repo.json 부트스트랩 커밋용 (텔레그램 명령 허브 통합, 2026-08-29)
+permissions:
+  contents: write
+
 on:
   workflow_dispatch:
     inputs:
@@ -76,3 +80,16 @@ jobs:
         with:
           path: .state
           key: dart-state-${{ github.run_id }}
+
+      # 첫 실행이 캐시 설정을 watch_config_repo.json으로 스냅샷하면 커밋해
+      # 서버 watch_bot(명령 허브)이 그 위에서 이어가게 한다. 이후 작성자는 서버뿐.
+      - name: Commit config bootstrap
+        if: always()
+        run: |
+          if [ -n "$(git status --porcelain watch_config_repo.json)" ]; then
+            git config user.name "dart-watch"
+            git config user.email "bot@actions"
+            git add watch_config_repo.json
+            git commit -m "watch_config 부트스트랩 스냅샷 (캐시 → repo)"
+            git pull --rebase -q && git push -q
+          fi

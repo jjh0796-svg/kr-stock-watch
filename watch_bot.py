@@ -95,20 +95,18 @@ def resolve_name(code):
 
 
 HELP = (
-    "📋 종목 관리\n"
+    "📋 종목 관리 — 목적별로 세 가지입니다\n"
     "\n"
     "💼 보유 종목 (전 봇 공용 — 알림에 💼 표시 + 방산 야간알림 등 승격)\n"
-    "/보유추가 005930 [이름]\n"
-    "/보유삭제 005930\n"
-    "/보유목록\n"
+    "/보유추가 005930 [이름] · /보유삭제 · /보유목록  (영문: /hold /hold_del /holds)\n"
     "\n"
-    "⭐ 스파이크 관심 종목 (장중 감시 전용)\n"
-    "/스파이크추가 005930 — 코드로 추가 (이름 자동, /추가 도 동일)\n"
-    "/스파이크삭제 005930\n"
-    "/스파이크목록\n"
+    "⭐ 주가 스파이크 감시 (장중 급등락·거래량·52주 — 보유 종목은 자동 포함)\n"
+    "/스파이크추가 005930 · /스파이크삭제 · /스파이크목록  (영문: /spike /spike_del /spikes)\n"
     "\n"
-    "※ 보유 종목은 스파이크 감시(거래량·52주 트리거 포함)에 자동 포함됩니다\n"
-    "※ DART 공시감시·마감스캔 대상 종목은 별개(깃헙 WATCHLIST 설정, 클로드에게 요청)"
+    "📢 공시감시 (DART 실시간 — 설정 변경은 다음 사이클 ≤15분 반영)\n"
+    "/추가 005930 · /삭제 · /목록 · /유형 · /전체 · /키워드 · /기업 삼성전자\n"
+    "\n"
+    "※ 마감스캔 대상은 공시감시 목록과 동일합니다"
 )
 
 
@@ -157,7 +155,8 @@ def handle(text):
         lines = [f"💼 {n}({c})" for c, n in sorted(hd.items())]
         return f"💼 보유 {len(hd)}종목\n" + "\n".join(lines)
 
-    if cmd in ("추가", "스파이크추가", "add"):
+    # 주의: 한글 /추가·/삭제·/목록은 공시감시(DART) 명령 — 스파이크는 전용 명령만 받는다
+    if cmd in ("스파이크추가", "스파이크"):
         if len(parts) < 2 or not parts[1].isdigit() or len(parts[1]) != 6:
             return "형식: /스파이크추가 종목코드6자리 [이름]"
         code = parts[1]
@@ -167,27 +166,94 @@ def handle(text):
         wl = read_wl()
         wl[code] = name
         save_wl(wl)
-        return f"✅ 추가됨: {name}({code}) — 총 {len(wl)}종목"
+        return f"⭐ 스파이크(주가) 감시 추가: {name}({code}) — 총 {len(wl)}종목"
 
-    if cmd in ("삭제", "스파이크삭제", "제거", "del", "remove"):
+    if cmd in ("스파이크삭제", "스파이크제거"):
         if len(parts) < 2:
-            return "형식: /삭제 종목코드"
+            return "형식: /스파이크삭제 종목코드"
         code = parts[1]
         wl = read_wl()
         if code in wl:
             name = wl.pop(code)
             save_wl(wl)
-            return f"🗑 삭제됨: {name}({code}) — 총 {len(wl)}종목"
+            return f"⭐ 스파이크 감시 해제: {name}({code}) — 총 {len(wl)}종목"
         return f"목록에 없는 코드입니다: {code}"
 
-    if cmd in ("목록", "스파이크목록", "list"):
+    if cmd in ("스파이크목록",):
         wl = read_wl()
         if not wl:
             return "스파이크 감시 종목이 비어 있습니다. /스파이크추가 로 등록하세요."
         lines = [f"· {n}({c})" for c, n in sorted(wl.items())]
         return f"📋 스파이크 감시 {len(wl)}종목\n" + "\n".join(lines)
 
+    # 📢 공시감시 명령 허브 (2026-08-29): dart_watch의 처리 로직을 재사용하고,
+    # 바뀐 설정을 watch_config_repo.json으로 커밋해 Actions 감시가 다음 사이클에 반영.
+    # (같은 토큰 getUpdates 충돌 해소 — 텔레그램 수신은 이 상주 봇이 전담)
+    dart_reply = handle_dart(text)
+    if dart_reply:
+        return dart_reply
+
     return None  # 모르는 명령은 무시 (다른 봇 메시지와 혼선 방지)
+
+
+DART_CFG_FILE = BASE_DIR / "watch_config_repo.json"
+DART_MUTATING = ("추가", "add", "삭제", "제거", "remove", "유형", "types",
+                 "전체", "all", "키워드", "keyword", "보고자", "reporter")
+DART_QUERY = ("목록", "list", "기업", "co", "company")
+
+
+def handle_dart(text):
+    cmd = text.strip().split()[0].lstrip("/").lower() if text.strip() else ""
+    if cmd not in DART_MUTATING and cmd not in DART_QUERY:
+        return None
+    import json
+    import re as _re
+    import subprocess
+
+    import dart_watch  # 같은 폴더(서버 clone) — 명령 로직 재사용
+
+    from common import DEFAULT_CONFIG
+
+    cfg = {k: (dict(v) if isinstance(v, dict) else list(v) if isinstance(v, list) else v)
+           for k, v in DEFAULT_CONFIG.items()}
+    if DART_CFG_FILE.exists():
+        try:
+            for k, v in json.loads(DART_CFG_FILE.read_text(encoding="utf-8")).items():
+                cfg[k] = v
+        except Exception:
+            pass
+    before = json.dumps({k: v for k, v in cfg.items() if k != "tg_offset"},
+                        ensure_ascii=False, sort_keys=True)
+    try:
+        reply = dart_watch.handle_command(text.strip(), cfg)
+    except Exception as e:
+        return f"📢 공시감시 명령 처리 오류: {type(e).__name__}: {e}"
+    if not reply:
+        return None
+    after = {k: v for k, v in cfg.items() if k != "tg_offset"}
+    changed = json.dumps(after, ensure_ascii=False, sort_keys=True) != before
+    if changed:
+        try:
+            DART_CFG_FILE.write_text(
+                json.dumps(after, ensure_ascii=False, indent=1), encoding="utf-8")
+            subprocess.run(["git", "-C", str(BASE_DIR), "pull", "-q", "--rebase"],
+                           capture_output=True, timeout=60)
+            subprocess.run(["git", "-C", str(BASE_DIR), "add", "watch_config_repo.json"],
+                           capture_output=True, timeout=30)
+            subprocess.run(["git", "-C", str(BASE_DIR),
+                            "-c", "user.name=watch-hub", "-c", "user.email=bot@server",
+                            "commit", "-q", "-m", f"watch hub: {text.strip()[:50]}"],
+                           capture_output=True, timeout=30)
+            push = subprocess.run(["git", "-C", str(BASE_DIR), "push", "-q"],
+                                  capture_output=True, timeout=60)
+            note = "\n\n📢 공시감시 설정 저장됨 — 다음 감시 사이클(≤15분)부터 적용"
+            if push.returncode != 0:
+                note = "\n\n⚠️ 설정 저장은 됐지만 전송 실패 — 다음 명령 때 재시도됩니다"
+        except Exception as e:
+            note = f"\n\n⚠️ 설정 전송 오류: {e}"
+        reply += note
+    # dart 응답은 HTML 태그 포함 — 이 봇은 평문 발송이라 태그 제거
+    return _re.sub(r"</?b>", "", reply)
 
 
 def main():
