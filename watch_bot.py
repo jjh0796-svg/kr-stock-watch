@@ -122,6 +122,11 @@ def handle(text):
     if cmd in ("start", "도움말", "help"):
         return HELP
 
+    # 텔레그램 메뉴 버튼용 영문 별칭 (메뉴 등록은 영문만 허용)
+    cmd = {"hold": "보유추가", "hold_del": "보유삭제", "holds": "보유목록",
+           "spike": "스파이크추가", "spike_del": "스파이크삭제",
+           "spikes": "스파이크목록"}.get(cmd, cmd)
+
     if cmd in ("보유추가", "보유"):
         if len(parts) < 2 or not parts[1].isdigit() or len(parts[1]) != 6:
             return "형식: /보유추가 종목코드6자리 [이름]"
