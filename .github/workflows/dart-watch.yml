@@ -2,9 +2,6 @@ name: DART Watch
 
 run-name: DART Watch (${{ inputs.trigger_source || github.event_name }})
 
-# watch_config_repo.json 부트스트랩 커밋용 (텔레그램 명령 허브 통합, 2026-08-29)
-permissions:
-  contents: write
 
 on:
   workflow_dispatch:
@@ -66,7 +63,9 @@ jobs:
         env:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          # 2026-08-29 봇 분리: 공시 알림·명령은 전용 '공시모니터링' 봇으로
+          # (미등록 시 기존 종목모니터링 봇 폴백)
+          TELEGRAM_BOT_TOKEN: ${{ secrets.DART_TELEGRAM_BOT_TOKEN || secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           WATCHLIST: ${{ secrets.WATCHLIST }}
           FILER_KEYWORDS: ${{ vars.FILER_KEYWORDS }}
@@ -80,16 +79,3 @@ jobs:
         with:
           path: .state
           key: dart-state-${{ github.run_id }}
-
-      # 첫 실행이 캐시 설정을 watch_config_repo.json으로 스냅샷하면 커밋해
-      # 서버 watch_bot(명령 허브)이 그 위에서 이어가게 한다. 이후 작성자는 서버뿐.
-      - name: Commit config bootstrap
-        if: always()
-        run: |
-          if [ -n "$(git status --porcelain watch_config_repo.json)" ]; then
-            git config user.name "dart-watch"
-            git config user.email "bot@actions"
-            git add watch_config_repo.json
-            git commit -m "watch_config 부트스트랩 스냅샷 (캐시 → repo)"
-            git pull --rebase -q && git push -q
-          fi

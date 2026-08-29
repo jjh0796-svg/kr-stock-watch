@@ -103,10 +103,8 @@ HELP = (
     "⭐ 주가 스파이크 감시 (장중 급등락·거래량·52주 — 보유 종목은 자동 포함)\n"
     "/스파이크추가 005930 · /스파이크삭제 · /스파이크목록  (영문: /spike /spike_del /spikes)\n"
     "\n"
-    "📢 공시감시 (DART 실시간 — 설정 변경은 다음 사이클 ≤15분 반영)\n"
-    "/추가 005930 · /삭제 · /목록 · /유형 · /전체 · /키워드 · /기업 삼성전자\n"
-    "\n"
-    "※ 마감스캔 대상은 공시감시 목록과 동일합니다"
+    "📢 공시감시(DART)는 별도 봇: '안녕하재 공시모니터링'\n"
+    "→ @filingsmonitor_0796_bot 에서 /추가·/목록·/유형 등 사용"
 )
 
 
@@ -186,74 +184,37 @@ def handle(text):
         lines = [f"· {n}({c})" for c, n in sorted(wl.items())]
         return f"📋 스파이크 감시 {len(wl)}종목\n" + "\n".join(lines)
 
-    # 📢 공시감시 명령 허브 (2026-08-29): dart_watch의 처리 로직을 재사용하고,
-    # 바뀐 설정을 watch_config_repo.json으로 커밋해 Actions 감시가 다음 사이클에 반영.
-    # (같은 토큰 getUpdates 충돌 해소 — 텔레그램 수신은 이 상주 봇이 전담)
-    dart_reply = handle_dart(text)
-    if dart_reply:
-        return dart_reply
+    # 📢 공시감시 명령은 2026-08-29 봇 분리로 전용 봇이 처리 — 길 안내만
+    if cmd in ("추가", "add", "삭제", "제거", "remove", "목록", "list", "유형",
+               "types", "전체", "all", "키워드", "keyword", "기업", "co",
+               "company", "보고자", "reporter"):
+        return ("📢 공시감시 명령은 '안녕하재 공시모니터링' 봇으로 분리됐습니다\n"
+                "→ @filingsmonitor_0796_bot 대화방에서 입력해 주세요\n"
+                "(이 봇은 💼 보유 /hold · ⭐ 주가 스파이크 /spike 전용)")
 
     return None  # 모르는 명령은 무시 (다른 봇 메시지와 혼선 방지)
 
 
-DART_CFG_FILE = BASE_DIR / "watch_config_repo.json"
-DART_MUTATING = ("추가", "add", "삭제", "제거", "remove", "유형", "types",
-                 "전체", "all", "키워드", "keyword", "보고자", "reporter")
-DART_QUERY = ("목록", "list", "기업", "co", "company")
+MY_MENU = [
+    ("hold", "💼 보유 추가 — 전 봇 마킹·알림 승격 (=/보유추가)"),
+    ("holds", "💼 보유 목록 (=/보유목록)"),
+    ("hold_del", "💼 보유 삭제 (=/보유삭제)"),
+    ("spike", "⭐ 주가 스파이크 감시 추가 (=/스파이크추가)"),
+    ("spikes", "⭐ 주가 스파이크 목록 (=/스파이크목록)"),
+    ("spike_del", "⭐ 주가 스파이크 삭제 (=/스파이크삭제)"),
+    ("help", "사용법 안내"),
+]
 
 
-def handle_dart(text):
-    cmd = text.strip().split()[0].lstrip("/").lower() if text.strip() else ""
-    if cmd not in DART_MUTATING and cmd not in DART_QUERY:
-        return None
-    import json
-    import re as _re
-    import subprocess
-
-    import dart_watch  # 같은 폴더(서버 clone) — 명령 로직 재사용
-
-    from common import DEFAULT_CONFIG
-
-    cfg = {k: (dict(v) if isinstance(v, dict) else list(v) if isinstance(v, list) else v)
-           for k, v in DEFAULT_CONFIG.items()}
-    if DART_CFG_FILE.exists():
-        try:
-            for k, v in json.loads(DART_CFG_FILE.read_text(encoding="utf-8")).items():
-                cfg[k] = v
-        except Exception:
-            pass
-    before = json.dumps({k: v for k, v in cfg.items() if k != "tg_offset"},
-                        ensure_ascii=False, sort_keys=True)
+def register_menu(token):
+    """'/' 팝업 메뉴 등록 (시작 시 1회, 멱등) — 이 봇은 보유·스파이크 전용."""
     try:
-        reply = dart_watch.handle_command(text.strip(), cfg)
+        requests.post(f"https://api.telegram.org/bot{token}/setMyCommands",
+                      json={"commands": [{"command": c, "description": d}
+                                         for c, d in MY_MENU]},
+                      timeout=10)
     except Exception as e:
-        return f"📢 공시감시 명령 처리 오류: {type(e).__name__}: {e}"
-    if not reply:
-        return None
-    after = {k: v for k, v in cfg.items() if k != "tg_offset"}
-    changed = json.dumps(after, ensure_ascii=False, sort_keys=True) != before
-    if changed:
-        try:
-            DART_CFG_FILE.write_text(
-                json.dumps(after, ensure_ascii=False, indent=1), encoding="utf-8")
-            subprocess.run(["git", "-C", str(BASE_DIR), "pull", "-q", "--rebase"],
-                           capture_output=True, timeout=60)
-            subprocess.run(["git", "-C", str(BASE_DIR), "add", "watch_config_repo.json"],
-                           capture_output=True, timeout=30)
-            subprocess.run(["git", "-C", str(BASE_DIR),
-                            "-c", "user.name=watch-hub", "-c", "user.email=bot@server",
-                            "commit", "-q", "-m", f"watch hub: {text.strip()[:50]}"],
-                           capture_output=True, timeout=30)
-            push = subprocess.run(["git", "-C", str(BASE_DIR), "push", "-q"],
-                                  capture_output=True, timeout=60)
-            note = "\n\n📢 공시감시 설정 저장됨 — 다음 감시 사이클(≤15분)부터 적용"
-            if push.returncode != 0:
-                note = "\n\n⚠️ 설정 저장은 됐지만 전송 실패 — 다음 명령 때 재시도됩니다"
-        except Exception as e:
-            note = f"\n\n⚠️ 설정 전송 오류: {e}"
-        reply += note
-    # dart 응답은 HTML 태그 포함 — 이 봇은 평문 발송이라 태그 제거
-    return _re.sub(r"</?b>", "", reply)
+        print(f"[TG] setMyCommands 실패: {e}")
 
 
 def main():
@@ -264,6 +225,7 @@ def main():
         sys.exit("TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID 필요 (~/bots/krwatch.env)")
     api = f"https://api.telegram.org/bot{token}"
     offset = 0
+    register_menu(token)
     print("watch_bot 시작")
     while True:
         try:
