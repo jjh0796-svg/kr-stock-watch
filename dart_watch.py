@@ -414,6 +414,12 @@ def process_commands(cfg: dict, wait: int = 0) -> bool:
         if wait:
             time.sleep(wait)
         return False
+    # 봇 토큰이 바뀌면(2026-08-29 공시봇 분리) 오프셋은 구봇 기준이라 새 봇에서
+    # getUpdates가 영원히 빈 결과 — 토큰 지문이 다르면 오프셋 리셋.
+    tail = token[-8:]
+    if cfg.get("tg_token_tail") != tail:
+        cfg["tg_offset"] = 0
+        cfg["tg_token_tail"] = tail
     try:
         r = requests.get(f"https://api.telegram.org/bot{token}/getUpdates",
                          params={"offset": cfg.get("tg_offset", 0) + 1, "timeout": wait},
@@ -681,7 +687,12 @@ def main() -> None:
 
     while True:
         if not in_window():
-            print(f"[{now_kst():%a %H:%M}] 감시 시간대 밖 — 명령만 처리하고 종료")
+            # 시간대 밖(저녁·주말): 공시 폴링은 멈추고 **명령 접수 전용** 롱폴링으로
+            # 잡 시간을 채운다 (2026-08-29 — 주말에도 종목·유형 변경이 즉시 반영되게).
+            print(f"[{now_kst():%a %H:%M}] 감시 시간대 밖 — 명령 접수 모드")
+            while time.monotonic() < deadline:
+                if process_commands(cfg, wait=int(min(50, max(deadline - time.monotonic(), 1)))):
+                    save_watch_config(cfg)
             break
         try:
             poll_once(api_key, state, cfg)
