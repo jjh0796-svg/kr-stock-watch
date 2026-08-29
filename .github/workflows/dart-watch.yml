@@ -71,6 +71,9 @@ jobs:
           FILER_KEYWORDS: ${{ vars.FILER_KEYWORDS }}
           DRY_RUN: ${{ inputs.dry_run == true && '1' || '' }}
           POLL_TOTAL_SECONDS: ${{ inputs.single_shot == true && '0' || '870' }}
+          # 2026-08-29 감시 주기 단축 60→30초 (DART 호출 ~1.5천/일 — kr-earnings-pulse
+          # 1.1만과 합쳐도 일 한도 2만의 65% 수준)
+          POLL_INTERVAL: "30"
         run: python dart_watch.py
 
       - name: Save seen state
