@@ -41,12 +41,16 @@ def load_env():
 
 WATCHLIST_FILE = Path(os.environ.get("WATCHLIST_FILE",
                                      str(Path.home() / "bots" / "watchlist.csv")))
+# 보유 종목 — 전 봇 공용 포지션 파일 (2026-08-29): 스파이크·방산·뉴스봇 등이
+# 💼 마킹과 알림 승격에 사용한다. 형식은 watchlist와 동일("코드,이름").
+HOLDINGS_FILE = Path(os.environ.get("HOLDINGS_FILE",
+                                    str(Path.home() / "bots" / "holdings.csv")))
 
 
-def read_wl():
+def _read_csv(path):
     out = {}
-    if WATCHLIST_FILE.exists():
-        for line in WATCHLIST_FILE.read_text(encoding="utf-8-sig").splitlines():
+    if path.exists():
+        for line in path.read_text(encoding="utf-8-sig").splitlines():
             if "," in line:
                 code, _, name = line.partition(",")
                 if code.strip().isdigit():
@@ -54,11 +58,27 @@ def read_wl():
     return out
 
 
-def save_wl(wl):
-    WATCHLIST_FILE.parent.mkdir(parents=True, exist_ok=True)
-    WATCHLIST_FILE.write_text(
-        "\n".join(f"{c},{n}" for c, n in sorted(wl.items())) + "\n",
+def _save_csv(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "\n".join(f"{c},{n}" for c, n in sorted(data.items())) + "\n",
         encoding="utf-8")
+
+
+def read_wl():
+    return _read_csv(WATCHLIST_FILE)
+
+
+def save_wl(wl):
+    _save_csv(WATCHLIST_FILE, wl)
+
+
+def read_hd():
+    return _read_csv(HOLDINGS_FILE)
+
+
+def save_hd(hd):
+    _save_csv(HOLDINGS_FILE, hd)
 
 
 def resolve_name(code):
@@ -75,16 +95,20 @@ def resolve_name(code):
 
 
 HELP = (
-    "📋 스파이크 감시 종목 관리\n"
+    "📋 종목 관리\n"
+    "\n"
+    "💼 보유 종목 (전 봇 공용 — 알림에 💼 표시 + 방산 야간알림 등 승격)\n"
+    "/보유추가 005930 [이름]\n"
+    "/보유삭제 005930\n"
+    "/보유목록\n"
+    "\n"
+    "⭐ 스파이크 관심 종목 (장중 감시 전용)\n"
     "/스파이크추가 005930 — 코드로 추가 (이름 자동, /추가 도 동일)\n"
-    "/스파이크추가 005930 삼성전자 — 이름 지정\n"
     "/스파이크삭제 005930\n"
     "/스파이크목록\n"
     "\n"
-    "※ 이 목록은 **장중 스파이크 감시 전용**입니다\n"
-    "  (거래량 폭증·52주 신고저 — 시장 전체 급등락 감시는 목록과 무관하게 항상 작동)\n"
-    "※ DART 공시감시·마감스캔 대상 종목은 별개로, 깃헙 kr-stock-watch의\n"
-    "  WATCHLIST 설정에서 관리됩니다 (변경은 클로드에게 요청)"
+    "※ 보유 종목은 스파이크 감시(거래량·52주 트리거 포함)에 자동 포함됩니다\n"
+    "※ DART 공시감시·마감스캔 대상 종목은 별개(깃헙 WATCHLIST 설정, 클로드에게 요청)"
 )
 
 
@@ -97,6 +121,36 @@ def handle(text):
 
     if cmd in ("start", "도움말", "help"):
         return HELP
+
+    if cmd in ("보유추가", "보유"):
+        if len(parts) < 2 or not parts[1].isdigit() or len(parts[1]) != 6:
+            return "형식: /보유추가 종목코드6자리 [이름]"
+        code = parts[1]
+        name = " ".join(parts[2:]) if len(parts) > 2 else resolve_name(code)
+        if not name:
+            return f"❓ {code} 종목명을 찾지 못했습니다. `/보유추가 {code} 이름` 으로 지정해주세요."
+        hd = read_hd()
+        hd[code] = name
+        save_hd(hd)
+        return f"💼 보유 등록: {name}({code}) — 총 {len(hd)}종목\n(전 봇에서 💼 표시·알림 승격 적용)"
+
+    if cmd in ("보유삭제", "보유제거"):
+        if len(parts) < 2:
+            return "형식: /보유삭제 종목코드"
+        code = parts[1]
+        hd = read_hd()
+        if code in hd:
+            name = hd.pop(code)
+            save_hd(hd)
+            return f"🗑 보유 해제: {name}({code}) — 총 {len(hd)}종목"
+        return f"보유 목록에 없는 코드입니다: {code}"
+
+    if cmd in ("보유목록",):
+        hd = read_hd()
+        if not hd:
+            return "보유 종목이 비어 있습니다. /보유추가 로 등록하세요."
+        lines = [f"💼 {n}({c})" for c, n in sorted(hd.items())]
+        return f"💼 보유 {len(hd)}종목\n" + "\n".join(lines)
 
     if cmd in ("추가", "스파이크추가", "add"):
         if len(parts) < 2 or not parts[1].isdigit() or len(parts[1]) != 6:

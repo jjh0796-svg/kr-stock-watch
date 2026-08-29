@@ -96,6 +96,21 @@ def read_watchlist():
     return out
 
 
+def read_holdings():
+    """보유 종목 (watch_bot /보유추가 관리, 전 봇 공용 — 2026-08-29).
+    스파이크 감시에선 워치리스트와 동일 대우 + 💼 태그."""
+    out = {}
+    hf = Path(os.environ.get("HOLDINGS_FILE",
+                             str(Path.home() / "bots" / "holdings.csv")))
+    if hf.exists():
+        for line in hf.read_text(encoding="utf-8-sig").splitlines():
+            if "," in line:
+                code, _, name = line.partition(",")
+                if code.strip().isdigit():
+                    out[code.strip()] = name.strip()
+    return out
+
+
 # ------------------------------------------------------------------ 수집
 
 def fetch_rank(sort, market):
@@ -139,7 +154,7 @@ def fetch_quotes(codes):
 def prep():
     """아침: 워치리스트의 20일 평균 거래량·52주 고저를 pykrx로 캐시."""
     from pykrx import stock
-    wl = read_watchlist()
+    wl = {**read_watchlist(), **read_holdings()}  # 보유 종목도 트리거 캐시 대상
     end = datetime.date.today().strftime("%Y%m%d")
     start_1y = (datetime.date.today() - datetime.timedelta(days=370)).strftime("%Y%m%d")
     cache = {}
@@ -207,7 +222,8 @@ def tick():
     sent = load_json(STATE_DIR / f"sent_{day}.json", {})
     ts = now.strftime("%H:%M")
 
-    wl = read_watchlist()
+    hd = read_holdings()
+    wl = {**read_watchlist(), **hd}  # 보유는 워치와 동일 트리거 + 💼 태그
     ranked = {}   # code -> rate (등락 상위 리스트 출신)
     for market in ("KOSPI", "KOSDAQ"):
         for sort in ("up", "down"):
@@ -226,7 +242,7 @@ def tick():
 
     for code, q in quotes.items():
         name, price, rate = q["name"], q["price"], q["rate"]
-        tag = "⭐" if code in wl else "·"
+        tag = "💼" if code in hd else ("⭐" if code in wl else "·")
 
         # 이력 적재 (최근 10분)
         h = hist.setdefault(code, [])
