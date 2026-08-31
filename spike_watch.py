@@ -178,10 +178,17 @@ def prep():
 # ------------------------------------------------------------------ tick
 
 def in_session(now):
+    """이력 적재 창 — 09:00부터 가격을 쌓아야 5분 트리거가 09:05에 바로 발동한다
+    (2026-08-31: 기존 09:05 시작이라 첫 5분 급변 알림이 09:10에야 열리던 지연 해소)."""
     if now.weekday() >= 5:
         return False
     t = now.time()
-    return datetime.time(9, 5) <= t <= datetime.time(15, 30)
+    return datetime.time(9, 0) <= t <= datetime.time(15, 30)
+
+
+def alerts_allowed(now):
+    """알림 발송 창 — 개장 직후 동시호가 왜곡(09:00~09:04)은 적재만 하고 침묵."""
+    return now.time() >= datetime.time(9, 5)
 
 
 def log_signal(code, name, direction, note):
@@ -236,6 +243,9 @@ def tick():
 
     ups, downs, others = [], [], []   # (정렬키, 줄) — 🔴급등/🔵급락/📢거래량·52주
     sigs = []                          # (code, name, dir, note) — 성과 채점용
+    # 09:00~09:04 침묵 창 — 트리거 평가 없이 이력만 적재해야 sent 오염(미발송 신호가
+    # 중복방지에 기록돼 09:05 이후 영영 침묵)이 없다
+    silent = not alerts_allowed(now)
 
     def mark(code, kind, extra=None):
         sent.setdefault(code, {})[kind] = extra if extra is not None else True
@@ -248,6 +258,9 @@ def tick():
         h = hist.setdefault(code, [])
         h.append([ts, price])
         del h[:-11]
+
+        if silent:
+            continue
 
         s = sent.get(code, {})
 
@@ -310,6 +323,10 @@ def tick():
         if len(items) > n:
             lines.append(f"… 외 {len(items)-n}건")
         return lines
+
+    if silent:
+        print(f"{ts} 개장 직후 침묵 창 — 이력만 적재")
+        return
 
     total = len(ups) + len(downs) + len(others)
     if total:
