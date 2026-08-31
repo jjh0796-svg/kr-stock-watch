@@ -214,9 +214,15 @@ def send(lines):
     if not token or not chat:
         print("[관찰모드] 발송 생략:\n" + text)
         return
-    requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
-                  json={"chat_id": chat, "text": text,
-                        "disable_web_page_preview": True}, timeout=20)
+    # 실패가 조용히 사라지면 "보냈는데 안 온" 사고를 진단할 수 없다 — 결과를 로그에 남긴다
+    try:
+        r = requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
+                          json={"chat_id": chat, "text": text,
+                              "disable_web_page_preview": True}, timeout=20)
+        if r.status_code != 200:
+            print(f"send 실패 HTTP {r.status_code}: {r.text[:150]}")
+    except Exception as e:
+        print(f"send 예외: {e}")
 
 
 def tick():
