@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 """
 장중 스파이크 감시 (spike_watch)
-- 유니버스: 워치리스트(watchlist.csv) + 코스피·코스닥 등락률 상위/하위 각 20종목
+- 유니버스: 워치리스트(watchlist.csv+holdings.csv) + 코스피·코스닥 등락률 상위/하위
+  각 20종목 + 거래대금 상위 각 20종목
 - 트리거:
   T1 급변: 최근 5분 ±3% 이상 (전 유니버스) / 등락 상위 리스트 최초 진입(±7%↑)
   T2 거래량: 당일 누적 거래량이 20일 평균의 300% 돌파 (워치리스트만)
+  T2b 거래량 폭발: 거래대금 상위 종목이 당일 누적 20일 평균 3배 돌파 (시장 전체 입구)
   T3 52주 신고가/신저가 터치 (워치리스트만)
 - 노이즈 억제: 종목·트리거당 1일 1회, T1 재알림은 직전 알림가 대비 추가 ±3%시.
   장 시작 직후(09:00~09:05) 제외, 폴링 매분 09:05~15:30.
@@ -36,6 +38,7 @@ CHG_5MIN = 3.0        # T1: 5분 변동 임계 (%)
 CHG_ENTRY = 7.0       # T1b: 등락 상위 최초 진입 알림 임계 (%)
 VOL_MULT = 3.0        # T2: 20일 평균 거래량 대비 배수
 RANK_N = 20           # 등락 상위/하위 각 종목 수
+AMOUNT_N = 20         # 거래대금 상위 스캔 종목 수 (시장별) — 2026-09-01 추가
 
 
 # ------------------------------------------------------------------ 환경/상태
@@ -126,6 +129,22 @@ def fetch_rank(sort, market):
         return []
 
 
+def fetch_amount_rank():
+    """네이버 PC 거래대금 상위(코스피 sosok=0·코스닥 1) → 종목코드 집합.
+    모바일 API에는 거래대금 정렬이 없어 PC 페이지에서 코드만 뽑는다(이름·시세는 quotes로)."""
+    import re as _re
+    codes = set()
+    for sosok in ("0", "1"):
+        try:
+            r = requests.get("https://finance.naver.com/sise/sise_quant_high.naver",
+                             params={"sosok": sosok}, headers=UA, timeout=10)
+            found = _re.findall(r'/item/main\.naver\?code=(\d{6})', r.text)
+            codes.update(found[:AMOUNT_N])
+        except Exception as e:
+            print(f"[warn] amount rank sosok={sosok}: {e}")
+    return codes
+
+
 def fetch_quotes(codes):
     """네이버 폴링 API 배치 시세. 반환 {code: {name, price, rate, volume}}"""
     out = {}
@@ -173,6 +192,33 @@ def prep():
             print(f"[warn] prep {code}: {e}")
     save_json(STATE_DIR / f"prep_{today_str()}.json", cache)
     print(f"prep 완료: {len(cache)}/{len(wl)}종목")
+    prep_market_vol()
+
+
+def prep_market_vol():
+    """전 종목 20일 평균 거래량 캐시 — 거래대금 상위 스캔(T2b)의 기준선.
+    pykrx 일별 전종목 시세를 거래일 20일치 모아 평균낸다 (08:40 prep에서 하루 1회)."""
+    from pykrx import stock
+    vols = {}
+    d = datetime.date.today()
+    got = 0
+    while got < 20 and (datetime.date.today() - d).days < 45:
+        d -= datetime.timedelta(days=1)
+        if d.weekday() >= 5:
+            continue
+        try:
+            df = stock.get_market_ohlcv(d.strftime("%Y%m%d"), market="ALL")
+        except Exception as e:
+            print(f"[warn] market vol {d}: {e}")
+            continue
+        if df is None or df.empty or int(df["거래량"].sum()) == 0:
+            continue  # 휴장일
+        got += 1
+        for code, vol in df["거래량"].items():
+            vols.setdefault(str(code), []).append(int(vol))
+    avg = {c: sum(v) / len(v) for c, v in vols.items() if v}
+    save_json(STATE_DIR / f"prep_marketvol_{today_str()}.json", avg)
+    print(f"전 종목 거래량 기준선: {len(avg)}종목 · {got}거래일 평균")
 
 
 # ------------------------------------------------------------------ tick
@@ -244,7 +290,10 @@ def tick():
                 code = s.get("itemCode", "")
                 if code:
                     ranked[code] = s
-    universe = set(wl) | set(ranked)
+    # 거래대금 상위 — "주가는 조용한데 거래량 폭발" 입구 (2026-09-01)
+    amount_set = fetch_amount_rank()
+    mvol = load_json(STATE_DIR / f"prep_marketvol_{day}.json", {})
+    universe = set(wl) | set(ranked) | amount_set
     quotes = fetch_quotes(universe)
 
     ups, downs, others = [], [], []   # (정렬키, 줄) — 🔴급등/🔵급락/📢거래량·52주
@@ -297,6 +346,17 @@ def tick():
             (ups if rate > 0 else downs).append((abs(rate), line))
             sigs.append((code, name, "up" if rate > 0 else "down", f"상위진입 {rate:+.1f}%"))
             mark(code, "entry")
+
+        # T2b: 거래대금 상위 종목의 거래량 폭발 — 당일 누적이 20일 평균의 3배 이상
+        # (ETF·ETN은 mvol 캐시에 없어 자연히 걸러진다)
+        mv = mvol.get(code, 0)
+        if (code in amount_set and mv > 0 and q["volume"] >= VOL_MULT * mv
+                and not s.get("t2m")):
+            mult = q["volume"] / mv
+            dot = "🔴" if rate > 0 else ("🔵" if rate < 0 else "⚪")
+            others.append((mult, f"{tag} {name} 거래대금상위 · 거래량 x{mult:.1f} {dot}{rate:+.1f}% · {price:,.0f}원"))
+            sigs.append((code, name, "up" if rate >= 0 else "down", f"거래량 x{mult:.1f}"))
+            mark(code, "t2m")
 
         # 워치리스트 전용 트리거
         p = prep_cache.get(code)
