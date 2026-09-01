@@ -94,14 +94,64 @@ def resolve_name(code):
     return None
 
 
+def search_stock(query):
+    """종목명(부분명 가능) → [(code, name)] 후보. 네이버 자동완성, 국내 종목만."""
+    try:
+        r = requests.get("https://ac.stock.naver.com/ac",
+                         params={"q": query, "target": "stock,ipo"},
+                         headers=UA, timeout=10)
+        out = []
+        for it in r.json().get("items", []):
+            code, name = it.get("code", ""), it.get("name", "")
+            if it.get("nationCode") == "KOR" and len(code) == 6 and code.isdigit():
+                out.append((code, name))
+        return out
+    except Exception:
+        return []
+
+
+def parse_target(args, usage):
+    """추가 명령 인자 → (code, name, 오류문). 6자리 코드 또는 종목명 허용."""
+    if not args:
+        return None, None, usage
+    if args[0].isdigit() and len(args[0]) == 6:
+        code = args[0]
+        name = " ".join(args[1:]) if len(args) > 1 else resolve_name(code)
+        if not name:
+            return None, None, f"❓ {code} 종목명을 찾지 못했습니다. 코드 뒤에 이름을 함께 적어주세요."
+        return code, name, None
+    query = " ".join(args)
+    cands = search_stock(query)
+    if not cands:
+        return None, None, f"❓ '{query}' 매칭 종목을 찾지 못했습니다. 6자리 코드로 시도해주세요."
+    norm = query.replace(" ", "")
+    exact = [c for c in cands if c[1].replace(" ", "") == norm]
+    if exact:
+        return exact[0][0], exact[0][1], None
+    # 첫 후보명에 검색어가 들어 있으면 자동 채택, 아니면 후보 제시
+    if norm in cands[0][1].replace(" ", "") or len(cands) == 1:
+        return cands[0][0], cands[0][1], None
+    lines = [f"· {n} ({c})" for c, n in cands[:4]]
+    return None, None, f"❓ '{query}' 후보가 여럿입니다. 코드로 다시 시도해주세요:\n" + "\n".join(lines)
+
+
+def find_in(book, key):
+    """저장 목록에서 코드 또는 이름(부분일치)으로 찾기 → 코드 or None."""
+    if key in book:
+        return key
+    norm = key.replace(" ", "")
+    hits = [c for c, n in book.items() if norm and norm in n.replace(" ", "")]
+    return hits[0] if len(hits) == 1 else None
+
+
 HELP = (
     "📋 종목 관리 — 목적별로 세 가지입니다\n"
     "\n"
     "💼 보유 종목 (전 봇 공용 — 알림에 💼 표시 + 방산 야간알림 등 승격)\n"
-    "/보유추가 005930 [이름] · /보유삭제 · /보유목록  (영문: /hold /hold_del /holds)\n"
+    "/보유추가 005930 또는 종목명 · /보유삭제 · /보유목록  (영문: /hold /hold_del /holds)\n"
     "\n"
     "⭐ 주가 스파이크 감시 (장중 급등락·거래량·52주 — 보유 종목은 자동 포함)\n"
-    "/스파이크추가 005930 · /스파이크삭제 · /스파이크목록  (영문: /spike /spike_del /spikes)\n"
+    "/스파이크추가 005930 또는 종목명 · /스파이크삭제 · /스파이크목록  (영문: /spike /spike_del /spikes)\n"
     "\n"
     "📢 공시감시(DART)는 별도 봇: '안녕하재 공시모니터링'\n"
     "→ @filingsmonitor_0796_bot 에서 /추가·/목록·/유형 등 사용"
@@ -124,12 +174,9 @@ def handle(text):
            "spikes": "스파이크목록"}.get(cmd, cmd)
 
     if cmd in ("보유추가", "보유"):
-        if len(parts) < 2 or not parts[1].isdigit() or len(parts[1]) != 6:
-            return "형식: /보유추가 종목코드6자리 [이름]"
-        code = parts[1]
-        name = " ".join(parts[2:]) if len(parts) > 2 else resolve_name(code)
-        if not name:
-            return f"❓ {code} 종목명을 찾지 못했습니다. `/보유추가 {code} 이름` 으로 지정해주세요."
+        code, name, err = parse_target(parts[1:], "형식: /보유추가 종목코드 또는 종목명\n예: /보유추가 005930 · /보유추가 삼성전자")
+        if err:
+            return err
         hd = read_hd()
         hd[code] = name
         save_hd(hd)
@@ -137,14 +184,14 @@ def handle(text):
 
     if cmd in ("보유삭제", "보유제거"):
         if len(parts) < 2:
-            return "형식: /보유삭제 종목코드"
-        code = parts[1]
+            return "형식: /보유삭제 종목코드 또는 종목명"
         hd = read_hd()
-        if code in hd:
+        code = find_in(hd, " ".join(parts[1:]))
+        if code:
             name = hd.pop(code)
             save_hd(hd)
             return f"🗑 보유 해제: {name}({code}) — 총 {len(hd)}종목"
-        return f"보유 목록에 없는 코드입니다: {code}"
+        return f"보유 목록에서 찾지 못했습니다: {' '.join(parts[1:])}"
 
     if cmd in ("보유목록",):
         hd = read_hd()
@@ -155,12 +202,9 @@ def handle(text):
 
     # 주의: 한글 /추가·/삭제·/목록은 공시감시(DART) 명령 — 스파이크는 전용 명령만 받는다
     if cmd in ("스파이크추가", "스파이크"):
-        if len(parts) < 2 or not parts[1].isdigit() or len(parts[1]) != 6:
-            return "형식: /스파이크추가 종목코드6자리 [이름]"
-        code = parts[1]
-        name = " ".join(parts[2:]) if len(parts) > 2 else resolve_name(code)
-        if not name:
-            return f"❓ {code} 종목명을 찾지 못했습니다. `/추가 {code} 이름` 으로 지정해주세요."
+        code, name, err = parse_target(parts[1:], "형식: /스파이크추가 종목코드 또는 종목명\n예: /스파이크추가 005930 · /스파이크추가 삼성전자")
+        if err:
+            return err
         wl = read_wl()
         wl[code] = name
         save_wl(wl)
@@ -168,14 +212,14 @@ def handle(text):
 
     if cmd in ("스파이크삭제", "스파이크제거"):
         if len(parts) < 2:
-            return "형식: /스파이크삭제 종목코드"
-        code = parts[1]
+            return "형식: /스파이크삭제 종목코드 또는 종목명"
         wl = read_wl()
-        if code in wl:
+        code = find_in(wl, " ".join(parts[1:]))
+        if code:
             name = wl.pop(code)
             save_wl(wl)
             return f"⭐ 스파이크 감시 해제: {name}({code}) — 총 {len(wl)}종목"
-        return f"목록에 없는 코드입니다: {code}"
+        return f"스파이크 목록에서 찾지 못했습니다: {' '.join(parts[1:])}"
 
     if cmd in ("스파이크목록",):
         wl = read_wl()
