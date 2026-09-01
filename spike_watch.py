@@ -192,33 +192,33 @@ def prep():
             print(f"[warn] prep {code}: {e}")
     save_json(STATE_DIR / f"prep_{today_str()}.json", cache)
     print(f"prep 완료: {len(cache)}/{len(wl)}종목")
-    prep_market_vol()
 
 
-def prep_market_vol():
-    """전 종목 20일 평균 거래량 캐시 — 거래대금 상위 스캔(T2b)의 기준선.
-    pykrx 일별 전종목 시세를 거래일 20일치 모아 평균낸다 (08:40 prep에서 하루 1회)."""
-    from pykrx import stock
-    vols = {}
-    d = datetime.date.today()
-    got = 0
-    while got < 20 and (datetime.date.today() - d).days < 45:
-        d -= datetime.timedelta(days=1)
-        if d.weekday() >= 5:
-            continue
-        try:
-            df = stock.get_market_ohlcv(d.strftime("%Y%m%d"), market="ALL")
-        except Exception as e:
-            print(f"[warn] market vol {d}: {e}")
-            continue
-        if df is None or df.empty or int(df["거래량"].sum()) == 0:
-            continue  # 휴장일
-        got += 1
-        for code, vol in df["거래량"].items():
-            vols.setdefault(str(code), []).append(int(vol))
-    avg = {c: sum(v) / len(v) for c, v in vols.items() if v}
-    save_json(STATE_DIR / f"prep_marketvol_{today_str()}.json", avg)
-    print(f"전 종목 거래량 기준선: {len(avg)}종목 · {got}거래일 평균")
+# T2b 기준선 — KRX 전종목 API는 서버(해외 IP)에서 차단이라 네이버 일봉으로 종목별 계산
+def naver_avg20(code):
+    """네이버 일봉 20일 평균 거래량 (당일 미완결 봉 제외, 실패 시 0)."""
+    try:
+        end = datetime.date.today()
+        start = end - datetime.timedelta(days=45)
+        r = requests.get("https://api.finance.naver.com/siseJson.naver",
+                         params={"symbol": code, "requestType": 1,
+                                 "startTime": start.strftime("%Y%m%d"),
+                                 "endTime": end.strftime("%Y%m%d"),
+                                 "timeframe": "day"},
+                         headers=UA, timeout=10)
+        rows = json.loads(r.text.replace("'", '"').replace("\n", ""))
+        today = end.strftime("%Y%m%d")
+        vols = [row[5] for row in rows[1:]
+                if str(row[0]) != today and isinstance(row[5], (int, float))]
+        vols = vols[-20:]
+        return sum(vols) / len(vols) if vols else 0
+    except Exception:
+        return 0
+
+
+# 거래대금 상위엔 ETF·ETN·선물형이 섞인다 — 개별 종목 신호가 아니므로 제외
+ETF_KEYWORDS = ("KODEX", "TIGER", "RISE", "ACE ", "SOL ", "PLUS ", "HANARO",
+                "KIWOOM ", "KoAct", "ARIRANG", "ETN", "레버리지", "인버스", "선물")
 
 
 # ------------------------------------------------------------------ tick
@@ -292,7 +292,14 @@ def tick():
                     ranked[code] = s
     # 거래대금 상위 — "주가는 조용한데 거래량 폭발" 입구 (2026-09-01)
     amount_set = fetch_amount_rank()
-    mvol = load_json(STATE_DIR / f"prep_marketvol_{day}.json", {})
+    mvol = load_json(STATE_DIR / "marketvol_cache.json", {})
+    dirty = False
+    for c in amount_set:
+        if mvol.get(c, {}).get("asof") != day:
+            mvol[c] = {"avg": naver_avg20(c), "asof": day}
+            dirty = True
+    if dirty:
+        save_json(STATE_DIR / "marketvol_cache.json", mvol)
     universe = set(wl) | set(ranked) | amount_set
     quotes = fetch_quotes(universe)
 
@@ -348,9 +355,9 @@ def tick():
             mark(code, "entry")
 
         # T2b: 거래대금 상위 종목의 거래량 폭발 — 당일 누적이 20일 평균의 3배 이상
-        # (ETF·ETN은 mvol 캐시에 없어 자연히 걸러진다)
-        mv = mvol.get(code, 0)
+        mv = mvol.get(code, {}).get("avg", 0)
         if (code in amount_set and mv > 0 and q["volume"] >= VOL_MULT * mv
+                and not any(k in name for k in ETF_KEYWORDS)
                 and not s.get("t2m")):
             mult = q["volume"] / mv
             dot = "🔴" if rate > 0 else ("🔵" if rate < 0 else "⚪")
