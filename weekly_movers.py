@@ -27,7 +27,7 @@ KR_MIN_MKTCAP = float(os.environ.get("KR_MIN_MKTCAP", "1e11"))     # 시총 1,00
 KR_MIN_TRDVAL = float(os.environ.get("KR_MIN_TRDVAL", "1e9"))      # 거래대금 10억↑
 KR_EXTRA_EXCLUDE = re.compile(r"리츠|인프라|하이일드|채권|투자회사")
 
-GEMINI_MODELS = ("gemini-2.5-flash", "gemini-2.0-flash")
+GEMINI_MODELS = ("gemini-flash-latest", "gemini-3.6-flash", "gemini-flash-lite-latest")
 
 
 def _num(s) -> float:

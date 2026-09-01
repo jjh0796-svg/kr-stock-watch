@@ -22,7 +22,7 @@ DART_BASE = "https://opendart.fss.or.kr/api"
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
 _GEMINI_MODELS = [m for m in (
     os.environ.get("GEMINI_MODEL", ""),
-    "gemini-flash-lite-latest", "gemini-flash-latest", "gemini-2.5-flash",
+    "gemini-flash-lite-latest", "gemini-flash-latest", "gemini-flash-latest",
 ) if m]
 _gemini_model_ok: str | None = None
 
