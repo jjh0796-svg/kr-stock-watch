@@ -20,6 +20,7 @@
 import os
 import re
 import time
+from datetime import timedelta
 
 import requests
 
@@ -624,6 +625,8 @@ def retry_pending_summaries(api_key: str, state: dict) -> None:
     pending: dict = state.get("pending_sum", {})
     # Migrate legacy target-only retries to the complete terms card.
     for rn,info in state.pop('pending_tgt',{}).items():
+        if rn[:8]<(now_kst()-timedelta(days=3)).strftime('%Y%m%d'):
+            continue  # Never dump a stale target-only backlog after upgrading.
         pending.setdefault(rn,info)
     state['pending_sum']=pending
     for rcept_no, info in list(pending.items()):
