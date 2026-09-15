@@ -19,11 +19,16 @@ class FamilyParser(HTMLParser):
 
 def related_receipts(receipt):
     try:
-        response=requests.get('https://dart.fss.or.kr/dsaf001/main.do',params={'rcpNo':receipt},headers={'User-Agent':'Mozilla/5.0'},timeout=(8,15))
+        response=requests.get('https://dart.fss.or.kr/dsaf001/main.do',params={'rcpNo':receipt},headers={'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36','Referer':'https://dart.fss.or.kr/','Connection':'close'},timeout=(10,25))
         response.raise_for_status();parser=FamilyParser();parser.feed(response.text)
         # Unexpected HTML must never connect unrelated messages.
-        return parser.receipts if receipt in parser.receipts else [receipt]
-    except Exception:return [receipt]
+        if receipt in parser.receipts:return parser.receipts
+        title=re.search(r'<title>(.*?)</title>',response.text,re.S)
+        print('[DART family unavailable]',receipt,response.status_code,len(response.content),title.group(1)[:100] if title else 'no title')
+        return [receipt]
+    except Exception as e:
+        print('[DART family unavailable]',receipt,type(e).__name__)
+        return [receipt]
 
 def send_filing(state,item,text,sender,save,token,chat,*,parse_mode='HTML',dry_run=False):
     receipt=item['rcept_no']
