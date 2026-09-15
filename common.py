@@ -38,26 +38,29 @@ def esc(s: str) -> str:
 # 주의: 읽기 타임아웃은 "서버 도착 후 응답만 유실"로 간주하고 재시도하지 않는다.
 # (재시도했다가 같은 메시지가 12통 도착한 사고 이력 있음 — 연결 실패만 재시도)
 
-def tg_send(text: str) -> bool:
+def tg_send(text: str, *, parse_mode='HTML', reply_to_message_id=None) -> int | bool:
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
     if DRY_RUN or not token or not chat_id:
         reason = "DRY_RUN" if DRY_RUN else "토큰/챗ID 없음"
         print(f"[TG:{reason}] {text[:3900]}")
-        return True
+        return bool(DRY_RUN)
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {
         "chat_id": chat_id,
         "text": text,
-        "parse_mode": "HTML",
         "disable_web_page_preview": True,
     }
+    if parse_mode:payload['parse_mode']=parse_mode
+    if reply_to_message_id is not None:
+        payload['reply_parameters']={'message_id':reply_to_message_id,'allow_sending_without_reply':True}
     for attempt in range(2):
         try:
             r = requests.post(url, json=payload, timeout=(10, 30))
             if r.status_code == 200:
-                return True
+                data=r.json()
+                return data.get('result',{}).get('message_id',False) if data.get('ok') else False
             if r.status_code == 429:
                 try:
                     wait = int(r.json().get("parameters", {}).get("retry_after", 5))

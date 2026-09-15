@@ -165,7 +165,7 @@ def _pick(rows: list[dict], rcept_no: str) -> dict | None:
     for row in rows:
         if row.get("rcept_no") == rcept_no:
             return row
-    return rows[-1] if rows else None
+    return None  # Another receipt can belong to another issuance or old amendment.
 
 
 # ─── 서식별 요약 ───────────────────────────────────────────────────────────────
@@ -896,6 +896,11 @@ def summarize(item: dict, api_key: str) -> str | None:
     corp_code = item.get("corp_code") or ""
     rcept_no = item.get("rcept_no") or ""
     rcept_dt = item.get("rcept_dt") or ""
+
+    if re.search(r'유무상증자결정|유상증자결정|사채권발행결정',title):
+        from issue_terms import issuance_summary
+        # A fixed receipt-specific card; never replace missing terms with free-form AI.
+        return issuance_summary(item,api_key)
 
     result = None
     try:

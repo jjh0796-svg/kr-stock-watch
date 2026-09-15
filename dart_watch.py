@@ -25,7 +25,9 @@ import requests
 
 from common import (DRY_RUN, UA_HEADERS, esc, load_state, load_watch_config,
                     load_watchlist, now_kst, save_state, save_watch_config, tg_send)
-from summarize import _issue_targets, company_card, stock_snapshot, summarize
+from summarize import company_card, stock_snapshot, summarize
+from filing_threads import send_filing
+from issue_terms import needs_retry
 
 ISSUE_RE = re.compile(r"유상증자결정|유무상증자결정|사채권발행결정")  # 발행대상이 있는 서식
 
@@ -548,6 +550,10 @@ def classify(item: dict, watch: dict[str, str], cfg: dict) -> str | None:
     return None
 
 
+def send_disclosure(state,item,text):
+    return send_filing(state,item,text,tg_send,lambda s:save_state(STATE_FILE,s),
+                       os.environ.get('TELEGRAM_BOT_TOKEN',''),os.environ.get('TELEGRAM_CHAT_ID',''),dry_run=DRY_RUN)
+
 def poll_once(api_key: str, state: dict, cfg: dict) -> None:
     watch = merged_watchlist(cfg)
     seen: dict = state.setdefault("seen", {})
@@ -569,16 +575,19 @@ def poll_once(api_key: str, state: dict, cfg: dict) -> None:
                 head, _, link = msg.rpartition("\n")
                 msg = f"{head}\n{summary}\n{link}"
                 compact_title = re.sub(r"\s+", "", it.get("report_nm") or "")
-                if ISSUE_RE.search(compact_title) and "대상:" not in summary:
-                    # 수치(구조화 API)는 나왔지만 원문(발행대상)이 아직인 시차 —
-                    # 대상자만 후속 메시지로 따라가게 별도 재시도
-                    state.setdefault("pending_tgt", {})[it["rcept_no"]] = {
+                if ISSUE_RE.search(compact_title) and needs_retry(summary):
+                    # Missing core terms are retried as one complete receipt-specific card.
+                    state.setdefault("pending_sum", {})[it["rcept_no"]] = {
                         "tries": 0,
                         "corp": it.get("corp_name", ""),
                         "code": (it.get("stock_code") or "").strip(),
                         "title": it.get("report_nm", ""),
+                        "corp_code":it.get('corp_code',''),"rcept_dt":it.get('rcept_dt',''),
                     }
             else:
+                if ISSUE_RE.search(re.sub(r'\s+','',it.get('report_nm',''))):
+                    head,_,link=msg.rpartition('\n')
+                    msg=f'{head}\n발행조건: 원문 확인 중 · 확인되면 이 알림에 답글로 보완합니다.\n{link}'
                 # 접수 직후엔 원문 파일·구조화 API 등록이 늦을 수 있다 — 알림은
                 # 먼저 보내고, 요약(규칙 또는 Gemini)은 데이터가 올라오는 대로
                 # 후속 메시지로 발송
@@ -596,7 +605,8 @@ def poll_once(api_key: str, state: dict, cfg: dict) -> None:
                 if snap:
                     head, _, link = msg.rpartition("\n")
                     msg = f"{head}\n{snap}\n{link}"
-            tg_send(msg)
+            if not send_disclosure(state,it,msg):
+                seen.pop(it['rcept_no'],None)
             alerts += 1
             time.sleep(0.5)
 
@@ -610,16 +620,18 @@ def poll_once(api_key: str, state: dict, cfg: dict) -> None:
 
 def retry_pending_summaries(api_key: str, state: dict) -> None:
     """데이터 등록 지연으로 미뤄둔 요약을 재시도.
-    처음 10분은 매 사이클, 이후엔 5사이클마다, 약 2.5시간까지 (원문 등록이
-    2시간 넘게 걸린 사례 확인됨)."""
+    처음 10회는 매 사이클, 이후엔 5사이클마다, 실제 경과시간 3시간까지."""
     pending: dict = state.get("pending_sum", {})
-    if not pending:
-        return
+    # Migrate legacy target-only retries to the complete terms card.
+    for rn,info in state.pop('pending_tgt',{}).items():
+        pending.setdefault(rn,info)
+    state['pending_sum']=pending
     for rcept_no, info in list(pending.items()):
         if "title" not in info:      # 구버전 큐 항목은 정리
             del pending[rcept_no]
             continue
         info["tries"] = info.get("tries", 0) + 1
+        expired=time.time()-info.setdefault('first_try',time.time())>=3*3600
         tries = info["tries"]
         if tries > 10 and tries % 5 != 0:
             continue
@@ -630,41 +642,16 @@ def retry_pending_summaries(api_key: str, state: dict) -> None:
         if summary:
             code = info.get("code", "")
             code_tag = f" ({code})" if code else ""
-            tg_send(f"🧾 <b>[요약] {esc(info.get('corp', ''))}</b>{code_tag}\n"
+            sent=send_disclosure(state,item,f"🧾 <b>[요약] {esc(info.get('corp', ''))}</b>{code_tag}\n"
                     f"{esc(info.get('title', ''))}\n{summary}\n{DART_VIEWER}{rcept_no}")
             title_compact = re.sub(r"\s+", "", info.get("title", ""))
-            if ISSUE_RE.search(title_compact) and "대상:" not in summary:
-                state.setdefault("pending_tgt", {})[rcept_no] = {
-                    "tries": 0, "corp": info.get("corp", ""),
-                    "code": code, "title": info.get("title", ""),
-                }
-            del pending[rcept_no]
-        elif tries >= 150:
-            print(f"[요약 포기] {rcept_no} — 데이터 미등록 (약 2.5시간 경과)")
+            if sent and not (ISSUE_RE.search(title_compact) and needs_retry(summary)):
+                del pending[rcept_no]
+            elif expired:del pending[rcept_no]
+        elif expired:
+            print(f"[요약 보류] {rcept_no} — 원문 확인 실패 (3시간 경과)")
             del pending[rcept_no]
 
-    # 발행대상만 밀린 건 (수치 요약은 이미 발송됨)
-    pending_tgt: dict = state.get("pending_tgt", {})
-    for rcept_no, info in list(pending_tgt.items()):
-        info["tries"] = info.get("tries", 0) + 1
-        tries = info["tries"]
-        if tries > 10 and tries % 5 != 0:
-            continue
-        target = None
-        try:
-            target = _issue_targets(api_key, rcept_no)
-        except Exception:
-            pass
-        if target:
-            code = info.get("code", "")
-            code_tag = f" ({code})" if code else ""
-            title = info.get("title", "")
-            title_line = f"{esc(title)}\n" if title else ""
-            tg_send(f"🎯 <b>[발행대상] {esc(info.get('corp', ''))}</b>{code_tag}\n"
-                    f"{title_line}{target}\n{DART_VIEWER}{rcept_no}")
-            del pending_tgt[rcept_no]
-        elif tries >= 150:
-            del pending_tgt[rcept_no]
     save_state(STATE_FILE, state)
 
 

@@ -6,6 +6,10 @@ run-name: DART Watch (${{ inputs.trigger_source || github.event_name }})
 on:
   workflow_dispatch:
     inputs:
+      verify_links:
+        description: "지난 공시 3건으로 발행조건·답글만 검증"
+        type: boolean
+        default: false
       dry_run:
         description: "텔레그램 발송 없이 실행"
         required: false
@@ -62,6 +66,7 @@ jobs:
             dart-state-
 
       - name: Run DART watch
+        if: ${{ inputs.verify_links != true }}
         env:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -77,6 +82,14 @@ jobs:
           # 1.1만과 합쳐도 일 한도 2만의 65% 수준)
           POLL_INTERVAL: "30"
         run: python dart_watch.py
+
+      - name: Verify disclosure terms and replies
+        if: ${{ inputs.verify_links == true }}
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.DART_TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python verify_disclosures.py
 
       - name: Save seen state
         if: always()
