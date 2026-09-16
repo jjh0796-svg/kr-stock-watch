@@ -10,6 +10,15 @@ import dart_watch
 
 FIXTURES=Path(__file__).parent/'fixtures'
 class IssuanceTests(unittest.TestCase):
+    def test_user_screenshot_subsidiary_contributions_use_current_table(self):
+        for rn in ['20260916800188','20260916800191']:
+            raw=(FIXTURES/(rn+'.xml')).read_text(encoding='utf-8')
+            text=summarize_xml(raw,'유상증자결정(종속회사의주요경영사항)')
+            for value in ['애경(영파)화공유한공사','758.91억원','2026-10-30','2026년 9월 17일','CNY 1.15억','원문 미기재']:
+                self.assertIn(value,text)
+            self.assertNotIn('CNY 2.3억',text)  # correction-before table must not leak into latest terms
+            self.assertFalse(needs_retry(text))
+            self.assertIsNone(summarize_xml(raw,'전환사채권발행결정'))
     def test_gwangjin_includes_both_targets_and_exact_terms(self):
         text=summarize_xml((FIXTURES/'20260915000331.xml').read_text(encoding='utf-8'),'유상증자결정')
         for value in ['3,260원','613,496주','1,999,996,960원','09월 30일','디에스케이디','더블유에이치에너지조합']:

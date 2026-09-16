@@ -1,0 +1,379 @@
+<html>
+ <head> 
+  <meta content="gdi" http-equiv="X-UA-TextLayoutMetrics"> 
+  <meta content="text/html; charset=euc-kr" http-equiv="Content-Type"> 
+  <STYLE>
+.xforms * { font-family: 돋움체;}
+.xforms_title * { font-size: 13pt; padding : 0 0 10 0;}
+
+.xforms table {
+    font-size: 10px;
+    padding:0px;
+    border-collapse:collapse;
+    color: #3D3D3D;
+}
+.xforms td {
+    padding-left:0px;
+    padding-top:0px;
+    border-collapse:collapse;
+    line-height:22px;
+    color: #3D3D3D;
+    /*text-align:right;*/
+    vertical-align:middle;
+    border: 1px solid #7f7f7f;
+}
+
+.xforms span {
+    /*display: inline-block;*/
+    padding-left:3px;
+    padding-right: 1px;
+    line-height:22px;
+    padding-top:0px;
+    padding-bottom:0px;
+    text-align:left;
+    vertical-align:middle;
+    border: 0px solid #DBDBDB;
+}
+
+.xforms.img{
+    border : 0px;
+}
+
+.xforms a:link {
+
+    color: #194866;
+    text-decoration: none;
+}
+.xforms a:active {
+
+    color: #194866;
+    text-decoration: none;
+}
+.xforms a:visited {
+    color: #194866;
+    text-decoration: none;
+}
+
+.xforms A:hover {
+    color:008BE3;
+    text-decoration: none;
+}
+
+.xforms_input{
+    border: 0px solid #DBDBDB;
+    padding-left:3px;
+    padding-right: 1px;
+    height:22px;
+    padding-top:0px;
+    padding-bottom:0px;
+    text-align:left;
+}
+</STYLE> 
+  <title>AK홀딩스/유상증자결정(종속회사의 주요경영사항)/(2026.09.16)유상증자결정(종속회사의 주요경영사항)</title> 
+ </head> 
+ <body> 
+  <div class="xforms"> 
+   <div> 
+    <div id="LIB_LC000" style="width:600px;font-size:10pt;;padding:0 0 20 0"> 
+     <div> 
+      <div> 
+       <span style="width:600px;font-size:10pt;font-weight:bold;text-align:center;">정정신고(보고)</span> 
+       <table border="0" bordercolordark="white" bordercolorlight="#666666" cellpadding="1" cellspacing="0" id="XFormD8_Form0_Table1" style="margin:0px 0px 20px 0px;width:600px;font-size:10pt;"> 
+        <tbody> 
+         <tr> 
+          <td width="434"> <span style="width:434px;font-size:10pt;text-align:right;">정정일자</span> </td> 
+          <td width="166"> <span class="xforms_input" style="width:166px;font-size:10pt;">2026-09-16</span> </td> 
+         </tr> 
+        </tbody> 
+       </table> 
+       <table border="1" bordercolordark="white" bordercolorlight="#666666" cellpadding="1" cellspacing="0" id="XFormD8_Form0_RepeatTable0" style="margin:0px 0px 20px 0px;width:600px;font-size:10pt;border:1px solid #7f7f7f;"> 
+        <tbody> 
+         <tr> 
+          <td width="200"> <span style="width:200px;font-size:10pt;">1. 정정관련 공시서류</span> </td> 
+          <td colspan="2" width="400"> <span class="xforms_input" style="width:400px;font-size:10pt;">유상증자결정(종속회사의주요경영사항</span> </td> 
+         </tr> 
+         <tr> 
+          <td width="200"> <span style="width:200px;font-size:10pt;">2. 정정관련 공시서류제출일</span> </td> 
+          <td colspan="2" width="400"> <span class="xforms_input" style="width:400px;font-size:10pt;">2026-08-31</span> </td> 
+         </tr> 
+         <tr> 
+          <td width="200"> <span style="width:200px;font-size:10pt;">3. 정정사유</span> </td> 
+          <td colspan="2" width="400"> <span class="xforms_input" style="width:400px;font-size:10pt;">2차 증자분 분납</span> </td> 
+         </tr> 
+         <tr> 
+          <td colspan="3" width="600"> <span style="width:600px;font-size:10pt;">4. 정정사항</span> </td> 
+         </tr> 
+         <tr> 
+          <td width="200"> <span style="width:200px;font-size:10pt;text-align:center;">정정항목</span> </td> 
+          <td width="200"> <span style="width:200px;font-size:10pt;text-align:center;">정정전</span> </td> 
+          <td width="200"> <span style="width:200px;font-size:10pt;text-align:center;">정정후</span> </td> 
+         </tr> 
+         <tr> 
+          <td width="200"> <span class="xforms_input" style="width:200px;font-size:10pt;">22. 기타 투자판단과 관련한 중요한 사항</span> </td> 
+          <td width="200"> <span class="xforms_input" style="width:200px;font-size:10pt;">- 본 공시는 당사의 자회사인 애경케미칼㈜의 100% 해외 종속회사인 Aekyung(Ningbo) Chemical Co.,Ltd. 의 채무상환자금 마련 등을 위한 유상증자 결정에 관련한 사항입니다. <br java="http://xml.apache.org/xalan/java"> <br java="http://xml.apache.org/xalan/java">- 중국 유한공사의 자본금은 주식으로 나누어지는것이 아니라 납입자본금에 대한 지분을 보유하게 되므로 공시내용에 주식수 및 액면금액은 기재하지 않습니다. <br java="http://xml.apache.org/xalan/java"> <br java="http://xml.apache.org/xalan/java">- 상기 '4. 자금조달의 목적금액'은 유상증자 금액(CNY3.5억)을 주주 결의일(2026/04/27) 기준 서울외국환중개 고시 매매기준율 216.83(원/CNH)을 적용하여 원화환산한 금액이며 원화 환산 금액은 실제 증자 대금 납입 시점의 환율에 따라 변동될 수 있습니다. <br java="http://xml.apache.org/xalan/java"> <br java="http://xml.apache.org/xalan/java">- 상기 12.납입일은 최종 종료 예정일로 해당기간까지 두 차례에 걸쳐 증자 예정입니다. 관련 일정은 관계기관의 인,허가 과정에서 변동될 수 있습니다. <br java="http://xml.apache.org/xalan/java"> <br java="http://xml.apache.org/xalan/java"> 1차) CNY 1.2억 (2026년 6월 10일) <br java="http://xml.apache.org/xalan/java"> 2차) CNY 2.3억 (2026년 10월 30일) <br java="http://xml.apache.org/xalan/java"> <br java="http://xml.apache.org/xalan/java">- 상기 18. 이사회결의일(결정일)은 Aekyung(Ningbo) Chemical Co.,Ltd.의 주주 결정일입니다. <br java="http://xml.apache.org/xalan/java"> <br java="http://xml.apache.org/xalan/java">- 하기 '종속회사에 관한 사항' 중 종속회사의 자산총액과 지배회사의 연결 자산총액은 한국채택국제회계기준(K-IFRS)에 따라 작성된 2025년도말 기준입니다.</span> </td> 
+          <td width="200"> <span class="xforms_input" style="width:200px;font-size:10pt;">- 본 공시는 당사의 자회사인 애경케미칼㈜의 100% 해외 종속회사인 Aekyung(Ningbo) Chemical Co.,Ltd. 의 채무상환자금 마련 등을 위한 유상증자 결정에 관련한 사항입니다. <br java="http://xml.apache.org/xalan/java"> <br java="http://xml.apache.org/xalan/java">- 중국 유한공사의 자본금은 주식으로 나누어지는것이 아니라 납입자본금에 대한 지분을 보유하게 되므로 공시내용에 주식수 및 액면금액은 기재하지 않습니다. <br java="http://xml.apache.org/xalan/java"> <br java="http://xml.apache.org/xalan/java">- 상기 '4. 자금조달의 목적금액'은 유상증자 금액(CNY3.5억)을 주주 결의일(2026/04/27) 기준 서울외국환중개 고시 매매기준율 216.83(원/CNH)을 적용하여 원화환산한 금액이며 원화 환산 금액은 실제 증자 대금 납입 시점의 환율에 따라 변동될 수 있습니다. <br java="http://xml.apache.org/xalan/java"> <br java="http://xml.apache.org/xalan/java">- 상기 12.납입일은 최종 종료 예정일로 해당기간까지 두 차례에 걸쳐 증자 예정입니다. 관련 일정은 관계기관의 인,허가 과정에서 변동될 수 있습니다. <br java="http://xml.apache.org/xalan/java"> <br java="http://xml.apache.org/xalan/java"> 1차) CNY 1.2억 (2026년 6월 10일) <br java="http://xml.apache.org/xalan/java"> 2차) CNY 1.15억 (2026년 9월 17일) <br java="http://xml.apache.org/xalan/java"> 3차) CNY 1.15억 (2026년 10월 30일) <br java="http://xml.apache.org/xalan/java"> <br java="http://xml.apache.org/xalan/java">- 상기 18. 이사회결의일(결정일)은 Aekyung(Ningbo) Chemical Co.,Ltd.의 주주 결정일입니다. <br java="http://xml.apache.org/xalan/java"> <br java="http://xml.apache.org/xalan/java">- 하기 '종속회사에 관한 사항' 중 종속회사의 자산총액과 지배회사의 연결 자산총액은 한국채택국제회계기준(K-IFRS)에 따라 작성된 2025년도말 기준입니다.</span> </td> 
+         </tr> 
+        </tbody> 
+       </table> 
+       <table border="1" bordercolordark="white" bordercolorlight="#666666" cellpadding="1" cellspacing="0" id="XFormD8_Form0_Table0" style="margin:0px 0px 20px 0px;width:599px;font-size:10pt;border:1px solid #7f7f7f;"> 
+        <tbody> 
+         <tr> 
+          <td width="599"> <span class="xforms_input" style="width:599px;font-size:10pt;">-</span> </td> 
+         </tr> 
+        </tbody> 
+       </table> 
+      </div> 
+     </div> 
+    </div> 
+    <div class="xforms_title"> 
+     <div> 
+      <span style="width:600px;font-weight:bold;text-align:center;">유상증자결정(종속회사의 주요경영사항)</span> 
+     </div> 
+    </div> 
+    <table border="1" bordercolordark="white" bordercolorlight="#666666" cellpadding="1" cellspacing="0" id="XFormD3_Form0_Table0" style="margin:0px 0px 20px 0px;width:600px;font-size:10pt;border:1px solid #7f7f7f;"> 
+     <tbody> 
+      <tr> 
+       <td width="136"> <span style="width:136px;font-size:10pt;">종속회사인</span> </td> 
+       <td width="264"> <span class="xforms_input" style="width:264px;font-size:10pt;">애경(영파)화공유한공사</span> </td> 
+       <td width="200"> <span style="width:200px;font-size:10pt;">의 주요경영사항 신고</span> </td> 
+      </tr> 
+     </tbody> 
+    </table> 
+    <table border="1" bordercolordark="white" bordercolorlight="#666666" cellpadding="1" cellspacing="0" id="XFormD3_Form0_Table3" style="margin:0px 0px 20px 0px;width:600px;font-size:10pt;border:1px solid #7f7f7f;"> 
+     <tbody> 
+      <tr> 
+       <td rowspan="2" width="143"> <span style="width:143px;font-size:10pt;">1. 신주의 종류와 수</span> </td> 
+       <td width="146"> <span style="width:146px;font-size:10pt;text-align:center;">보통주식(주)</span> </td> 
+       <td width="311"> <span class="xforms_input" style="width:311px;font-size:10pt;text-align:right;">-</span> </td> 
+      </tr> 
+      <tr> 
+       <td width="146"> <span style="width:146px;font-size:10pt;text-align:center;">종류주식(주)</span> </td> 
+       <td width="311"> <span class="xforms_input" style="width:311px;font-size:10pt;text-align:right;">-</span> </td> 
+      </tr> 
+      <tr> 
+       <td colspan="2" width="289"> <span style="width:289px;font-size:10pt;">2. 1주당 액면가액(원)</span> </td> 
+       <td width="311"> <span class="xforms_input" style="width:311px;font-size:10pt;text-align:right;">-</span> </td> 
+      </tr> 
+      <tr> 
+       <td rowspan="2" width="143"> <span style="width:143px;font-size:10pt;">3. 증자전 발행주식총수(주)</span> </td> 
+       <td width="146"> <span style="width:146px;font-size:10pt;text-align:center;">보통주식(주)</span> </td> 
+       <td width="311"> <span class="xforms_input" style="width:311px;font-size:10pt;text-align:right;">-</span> </td> 
+      </tr> 
+      <tr> 
+       <td width="146"> <span style="width:146px;font-size:10pt;text-align:center;">종류주식(주)</span> </td> 
+       <td width="311"> <span class="xforms_input" style="width:311px;font-size:10pt;text-align:right;">-</span> </td> 
+      </tr> 
+      <tr> 
+       <td rowspan="6" width="143"> <span style="width:143px;font-size:10pt;">4. 자금조달의 목적</span> </td> 
+       <td width="146"> <span style="width:146px;font-size:10pt;text-align:center;">시설자금(원)</span> </td> 
+       <td width="311"> <span class="xforms_input" style="width:311px;font-size:10pt;text-align:right;">4,770,260,000</span> </td> 
+      </tr> 
+      <tr> 
+       <td width="146"> <span style="width:146px;font-size:10pt;text-align:center;">영업양수자금(원)</span> </td> 
+       <td width="311"> <span class="xforms_input" style="width:311px;font-size:10pt;text-align:right;">-</span> </td> 
+      </tr> 
+      <tr> 
+       <td width="146"> <span style="width:146px;font-size:10pt;text-align:center;">운영자금(원)</span> </td> 
+       <td width="311"> <span class="xforms_input" style="width:311px;font-size:10pt;text-align:right;">39,463,060,000</span> </td> 
+      </tr> 
+      <tr> 
+       <td width="146"> <span style="width:146px;font-size:10pt;text-align:center;">채무상환자금(원)</span> </td> 
+       <td width="311"> <span class="xforms_input" style="width:311px;font-size:10pt;text-align:right;">31,657,180,000</span> </td> 
+      </tr> 
+      <tr> 
+       <td width="146"> <span style="width:146px;font-size:10pt;text-align:center;">타법인 증권 취득자금(원)</span> </td> 
+       <td width="311"> <span class="xforms_input" style="width:311px;font-size:10pt;text-align:right;">-</span> </td> 
+      </tr> 
+      <tr> 
+       <td width="146"> <span style="width:146px;font-size:10pt;text-align:center;">기타자금(원)</span> </td> 
+       <td width="311"> <span class="xforms_input" style="width:311px;font-size:10pt;text-align:right;">-</span> </td> 
+      </tr> 
+      <tr> 
+       <td colspan="2" width="289"> <span style="width:289px;font-size:10pt;">5. 증자방식</span> </td> 
+       <td width="311"> <span class="xforms_input" style="width:311px;font-size:10pt;">주주배정증자</span> </td> 
+      </tr> 
+     </tbody> 
+    </table> 
+    <div id="LIB_L9042" style="width:600px;font-size:10pt;;padding:0 0 20 0"> 
+     <div> 
+      <div> 
+       <span style="width:600px;font-size:11pt;font-weight:bold;">[주주배정증자의 경우]</span> 
+       <table border="1" bordercolordark="white" bordercolorlight="#666666" cellpadding="1" cellspacing="0" id="XFormG1_Form0_Table0" style="margin:0px 0px 20px 0px;width:585px;font-size:10pt;border:1px solid #7f7f7f;"> 
+        <tbody> 
+         <tr> 
+          <td rowspan="4" width="151"> <span style="width:151px;font-size:10pt;">6. 신주 발행가액</span> </td> 
+          <td rowspan="2" width="90"> <span style="width:90px;font-size:10pt;text-align:center;">확정발행가</span> </td> 
+          <td width="96"> <span style="width:96px;font-size:10pt;text-align:center;">보통주식(원)</span> </td> 
+          <td colspan="3" width="248"> <span class="xforms_input" style="width:248px;font-size:10pt;text-align:right;">-</span> </td> 
+         </tr> 
+         <tr> 
+          <td width="96"> <span style="width:96px;font-size:10pt;text-align:center;">종류주식(원)</span> </td> 
+          <td colspan="3" width="248"> <span class="xforms_input" style="width:248px;font-size:10pt;text-align:right;">-</span> </td> 
+         </tr> 
+         <tr> 
+          <td rowspan="2" width="90"> <span style="width:90px;font-size:10pt;text-align:center;">예정발행가</span> </td> 
+          <td width="96"> <span style="width:96px;font-size:10pt;text-align:center;">보통주식(원)</span> </td> 
+          <td width="82"> <span class="xforms_input" style="width:82px;font-size:10pt;text-align:right;">-</span> </td> 
+          <td width="83"> <span style="width:83px;font-size:10pt;text-align:center;">확정 예정일</span> </td> 
+          <td width="83"> <span class="xforms_input" style="width:83px;font-size:10pt;">-</span> </td> 
+         </tr> 
+         <tr> 
+          <td width="96"> <span style="width:96px;font-size:10pt;text-align:center;">종류주식(원)</span> </td> 
+          <td width="82"> <span class="xforms_input" style="width:82px;font-size:10pt;text-align:right;">-</span> </td> 
+          <td width="83"> <span style="width:83px;font-size:10pt;text-align:center;">확정 예정일</span> </td> 
+          <td width="83"> <span class="xforms_input" style="width:83px;font-size:10pt;">-</span> </td> 
+         </tr> 
+         <tr> 
+          <td colspan="3" width="337"> <span style="width:337px;font-size:10pt;">7. 발행가 산정방법</span> </td> 
+          <td colspan="3" width="248"> <span class="xforms_input" style="width:248px;font-size:10pt;">-</span> </td> 
+         </tr> 
+         <tr> 
+          <td colspan="3" width="337"> <span style="width:337px;font-size:10pt;">8. 신주배정기준일</span> </td> 
+          <td colspan="3" width="248"> <span class="xforms_input" style="width:248px;font-size:10pt;">-</span> </td> 
+         </tr> 
+         <tr> 
+          <td colspan="3" width="337"> <span style="width:337px;font-size:10pt;">9. 1주당 신주배정주식수(주)</span> </td> 
+          <td colspan="3" width="248"> <span class="xforms_input" style="width:248px;font-size:10pt;text-align:right;">-</span> </td> 
+         </tr> 
+         <tr> 
+          <td colspan="3" width="337"> <span style="width:337px;font-size:10pt;">10. 우리사주조합원 우선배정비율(%)</span> </td> 
+          <td colspan="3" width="248"> <span class="xforms_input" style="width:248px;font-size:10pt;text-align:right;">-</span> </td> 
+         </tr> 
+         <tr> 
+          <td rowspan="4" width="151"> <span style="width:151px;font-size:10pt;">11. 청약예정일</span> </td> 
+          <td rowspan="2" width="90"> <span style="width:90px;font-size:10pt;text-align:center;">우리사주조합</span> </td> 
+          <td width="96"> <span style="width:96px;font-size:10pt;text-align:center;">시작일</span> </td> 
+          <td colspan="3" width="248"> <span class="xforms_input" style="width:248px;font-size:10pt;">-</span> </td> 
+         </tr> 
+         <tr> 
+          <td width="96"> <span style="width:96px;font-size:10pt;text-align:center;">종료일</span> </td> 
+          <td colspan="3" width="248"> <span class="xforms_input" style="width:248px;font-size:10pt;">-</span> </td> 
+         </tr> 
+         <tr> 
+          <td rowspan="2" width="90"> <span style="width:90px;font-size:10pt;text-align:center;">구주주</span> </td> 
+          <td width="96"> <span style="width:96px;font-size:10pt;text-align:center;">시작일</span> </td> 
+          <td colspan="3" width="248"> <span class="xforms_input" style="width:248px;font-size:10pt;">-</span> </td> 
+         </tr> 
+         <tr> 
+          <td width="96"> <span style="width:96px;font-size:10pt;text-align:center;">종료일</span> </td> 
+          <td colspan="3" width="248"> <span class="xforms_input" style="width:248px;font-size:10pt;">-</span> </td> 
+         </tr> 
+         <tr> 
+          <td colspan="3" width="337"> <span style="width:337px;font-size:10pt;">12. 납입일</span> </td> 
+          <td colspan="3" width="248"> <span class="xforms_input" style="width:248px;font-size:10pt;">2026-10-30</span> </td> 
+         </tr> 
+         <tr> 
+          <td colspan="3" width="337"> <span style="width:337px;font-size:10pt;">13. 실권주 처리계획</span> </td> 
+          <td colspan="3" width="248"> <span class="xforms_input" style="width:248px;font-size:10pt;">해당사항 없음</span> </td> 
+         </tr> 
+         <tr> 
+          <td colspan="3" width="337"> <span style="width:337px;font-size:10pt;">14. 신주의 배당기산일</span> </td> 
+          <td colspan="3" width="248"> <span class="xforms_input" style="width:248px;font-size:10pt;">-</span> </td> 
+         </tr> 
+         <tr> 
+          <td colspan="3" width="337"> <span style="width:337px;font-size:10pt;">15. 신주권교부예정일</span> </td> 
+          <td colspan="3" width="248"> <span class="xforms_input" style="width:248px;font-size:10pt;">-</span> </td> 
+         </tr> 
+         <tr> 
+          <td colspan="3" width="337"> <span style="width:337px;font-size:10pt;">16. 대표주관회사(직접공모가 아닌 경우)</span> </td> 
+          <td colspan="3" width="248"> <span class="xforms_input" style="width:248px;font-size:10pt;">-</span> </td> 
+         </tr> 
+         <tr> 
+          <td colspan="3" width="337"> <span style="width:337px;font-size:10pt;">17. 신주인수권양도여부</span> </td> 
+          <td colspan="3" width="248"> <span class="xforms_input" style="width:248px;font-size:10pt;">미해당</span> </td> 
+         </tr> 
+         <tr> 
+          <td colspan="3" width="337"> <span style="width:337px;font-size:10pt;">18. 이사회결의일(결정일)</span> </td> 
+          <td colspan="3" width="248"> <span class="xforms_input" style="width:248px;font-size:10pt;">2026-04-27</span> </td> 
+         </tr> 
+         <tr> 
+          <td rowspan="2" width="151"> <span style="width:151px;font-size:10pt;"> - 독립(사외)이사* 참석여부</span> </td> 
+          <td colspan="2" width="186"> <span style="width:186px;font-size:10pt;text-align:center;">참석(명)</span> </td> 
+          <td colspan="3" width="248"> <span class="xforms_input" style="width:248px;font-size:10pt;text-align:right;">0</span> </td> 
+         </tr> 
+         <tr> 
+          <td colspan="2" width="186"> <span style="width:186px;font-size:10pt;text-align:center;">불참(명)</span> </td> 
+          <td colspan="3" width="248"> <span class="xforms_input" style="width:248px;font-size:10pt;text-align:right;">0</span> </td> 
+         </tr> 
+         <tr> 
+          <td colspan="3" width="337"> <span style="width:337px;font-size:10pt;"> - 감사(독립(사외)이사가 아닌 감사위원) 참석여부</span> </td> 
+          <td colspan="3" width="248"> <span class="xforms_input" style="width:248px;font-size:10pt;">-</span> </td> 
+         </tr> 
+         <tr> 
+          <td colspan="3" width="337"> <span style="width:337px;font-size:10pt;">19. 증권신고서 제출대상 여부</span> </td> 
+          <td colspan="3" width="248"> <span class="xforms_input" style="width:248px;font-size:10pt;">아니오</span> </td> 
+         </tr> 
+         <tr> 
+          <td colspan="3" width="337"> <span style="width:337px;font-size:10pt;">20. 제출을 면제받은 경우 그 사유</span> </td> 
+          <td colspan="3" width="248"> <span class="xforms_input" style="width:248px;font-size:10pt;">해외 비상장법인의 주주배정증자로 증권신고서 제출대상이 아님</span> </td> 
+         </tr> 
+         <tr> 
+          <td colspan="3" width="337"> <span style="width:337px;font-size:10pt;">21. 공정거래위원회 신고대상 여부</span> </td> 
+          <td colspan="3" width="248"> <span class="xforms_input" style="width:248px;font-size:10pt;">아니오</span> </td> 
+         </tr> 
+         <tr> 
+          <td colspan="3" rowspan="2" width="337"> <span style="width:337px;font-size:10pt;">22. 기타 투자판단과 관련한 중요사항</span> </td> 
+          <td colspan="3" width="248"> <span class="xforms_input" style="width:248px;font-size:10pt;">- 본 공시는 당사의 자회사인 애경케미칼㈜의 100% 해외 종속회사인 Aekyung(Ningbo) Chemical Co.,Ltd. 의 채무상환자금 마련 등을 위한 유상증자 결정에 관련한 사항입니다. <br java="http://xml.apache.org/xalan/java"> <br java="http://xml.apache.org/xalan/java">- 중국 유한공사의 자본금은 주식으로 나누어지는것이 아니라 납입자본금에 대한 지분을 보유하게 되므로 공시내용에 주식수 및 액면금액은 기재하지 않습니다. <br java="http://xml.apache.org/xalan/java"> <br java="http://xml.apache.org/xalan/java">- 상기 '4. 자금조달의 목적금액'은 유상증자 금액(CNY3.5억)을 주주 결의일(2026/04/27) 기준 서울외국환중개 고시 매매기준율 216.83(원/CNH)을 적용하여 원화환산한 금액이며 원화 환산 금액은 실제 증자 대금 납입 시점의 환율에 따라 변동될 수 있습니다. <br java="http://xml.apache.org/xalan/java"> <br java="http://xml.apache.org/xalan/java">- 상기 12.납입일은 최종 종료 예정일로 해당기간까지 두 차례에 걸쳐 증자 예정입니다. 관련 일정은 관계기관의 인,허가 과정에서 변동될 수 있습니다. <br java="http://xml.apache.org/xalan/java"> <br java="http://xml.apache.org/xalan/java"> 1차) CNY 1.2억 (2026년 6월 10일) <br java="http://xml.apache.org/xalan/java"> 2차) CNY 1.15억 (2026년 9월 17일) <br java="http://xml.apache.org/xalan/java"> 3차) CNY 1.15억 (2026년 10월 30일) <br java="http://xml.apache.org/xalan/java"> <br java="http://xml.apache.org/xalan/java"> <br java="http://xml.apache.org/xalan/java">- 상기 18. 이사회결의일(결정일)은 Aekyung(Ningbo) Chemical Co.,Ltd.의 주주 결정일입니다. <br java="http://xml.apache.org/xalan/java"> <br java="http://xml.apache.org/xalan/java">- 하기 '종속회사에 관한 사항' 중 종속회사의 자산총액과 지배회사의 연결 자산총액은 한국채택국제회계기준(K-IFRS)에 따라 작성된 2025년도말 기준입니다.</span> </td> 
+         </tr> 
+         <tr> 
+          <td width="82"> <span style="width:82px;font-size:10pt;">※ 관련공시</span> </td> 
+          <td colspan="2" width="166"> <span class="xforms_input" style="width:166px;font-size:10pt;">-</span> </td> 
+         </tr> 
+        </tbody> 
+       </table> 
+      </div> 
+     </div> 
+    </div> 
+    <span class="noprint" style="display:none;width:600px;font-size:10pt;"> </span> 
+    <span class="noprint" style="display:none;width:600px;font-size:10pt;"> </span> 
+    <span class="noprint" style="display:none;width:600px;font-size:10pt;"> </span> 
+    <span class="noprint" style="display:none;width:600px;font-size:10pt;"> </span> 
+    <span class="noprint" style="display:none;width:600px;font-size:10pt;"> </span> 
+    <span class="noprint" style="display:none;width:600px;font-size:10pt;"> </span> 
+    <span class="noprint" style="display:none;width:600px;font-size:10pt;"> </span> 
+    <span class="noprint" style="display:none;width:600px;font-size:10pt;"> </span> 
+    <span style="width:600px;font-size:11pt;font-weight:bold;">[종속회사에 관한 사항]</span> 
+    <table border="1" bordercolordark="white" bordercolorlight="#666666" cellpadding="1" cellspacing="0" id="XFormD3_Form0_Table1" style="margin:0px 0px 20px 0px;width:600px;font-size:10pt;border:1px solid #7f7f7f;"> 
+     <tbody> 
+      <tr> 
+       <td width="237"> <span style="width:237px;font-size:10pt;">종속회사명</span> </td> 
+       <td width="153"> <span class="xforms_input" style="width:153px;font-size:10pt;">애경(영파)화공유한공사</span> </td> 
+       <td width="58"> <span style="width:58px;font-size:10pt;text-align:center;">영문</span> </td> 
+       <td width="152"> <span class="xforms_input" style="width:152px;font-size:10pt;">Aekyung(Ningbo) Chemical Co.,Ltd.</span> </td> 
+      </tr> 
+      <tr> 
+       <td width="237"> <span style="width:237px;font-size:10pt;">
+         <!--?javax.xml.transform.disable-output-escaping?--> 
+         <!--?javax.xml.transform.enable-output-escaping?-->- 대표자</span> </td> 
+       <td colspan="3" width="363"> <span class="xforms_input" style="width:363px;font-size:10pt;">김성완</span> </td> 
+      </tr> 
+      <tr> 
+       <td width="237"> <span style="width:237px;font-size:10pt;">
+         <!--?javax.xml.transform.disable-output-escaping?--> 
+         <!--?javax.xml.transform.enable-output-escaping?-->- 주요사업</span> </td> 
+       <td colspan="3" width="363"> <span class="xforms_input" style="width:363px;font-size:10pt;">가소제 제조업</span> </td> 
+      </tr> 
+      <tr> 
+       <td width="237"> <span style="width:237px;font-size:10pt;">
+         <!--?javax.xml.transform.disable-output-escaping?--> 
+         <!--?javax.xml.transform.enable-output-escaping?-->- 주요종속회사 여부</span> </td> 
+       <td colspan="3" width="363"> <span class="xforms_input" style="width:363px;font-size:10pt;">미해당</span> </td> 
+      </tr> 
+      <tr> 
+       <td width="237"> <span style="width:237px;font-size:10pt;">종속회사의 자산총액(원)</span> </td> 
+       <td colspan="3" width="363"> <span class="xforms_input" style="width:363px;font-size:10pt;text-align:right;">81,660,962,902</span> </td> 
+      </tr> 
+      <tr> 
+       <td width="237"> <span style="width:237px;font-size:10pt;">지배회사의 연결 자산총액(원)</span> </td> 
+       <td colspan="3" width="363"> <span class="xforms_input" style="width:363px;font-size:10pt;text-align:right;">5,976,455,656,558</span> </td> 
+      </tr> 
+      <tr> 
+       <td width="237"> <span style="width:237px;font-size:10pt;">지배회사의 연결 자산총액 대비(%)</span> </td> 
+       <td colspan="3" width="363"> <span class="xforms_input" style="width:363px;font-size:10pt;text-align:right;">1.37</span> </td> 
+      </tr> 
+     </tbody> 
+    </table> 
+   </div> 
+  </div>  
+ </body>
+</html>
