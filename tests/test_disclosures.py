@@ -30,7 +30,7 @@ class IssuanceTests(unittest.TestCase):
         self.assertIsNone(summarize._pick([{'rcept_no':'other'}],'wanted'))
     def test_target_only_pending_retries_without_pending_summary(self):
         state={'pending_tgt':{'20260915000331':{'title':'유상증자결정','code':'026910','corp':'광진실업'}}}
-        with patch.object(dart_watch,'now_kst',return_value=datetime(2026,9,16,tzinfo=timezone.utc)),patch.object(dart_watch,'summarize',return_value='발행금액: 20억\n대상: A'),patch.object(dart_watch,'send_disclosure',return_value=True) as send,patch.object(dart_watch,'save_state'):
+        with patch.object(dart_watch,'now_kst',return_value=datetime(2026,9,16,tzinfo=timezone.utc)),patch.object(dart_watch,'stock_snapshot',return_value=None),patch.object(dart_watch,'summarize',return_value='발행금액: 20억\n대상: A'),patch.object(dart_watch,'edit_existing_disclosure',return_value=True) as send,patch.object(dart_watch,'save_state'):
             dart_watch.retry_pending_summaries('fake',state)
         self.assertTrue(send.called);self.assertFalse(state['pending_sum']);self.assertNotIn('pending_tgt',state)
 

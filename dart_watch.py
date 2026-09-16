@@ -26,7 +26,7 @@ import requests
 
 from common import (DRY_RUN, UA_HEADERS, esc, load_state, load_watch_config,
                     load_watchlist, now_kst, save_state, save_watch_config, tg_send)
-from summarize import company_card, stock_snapshot, summarize
+from summarize import company_card, stock_snapshot, summarize, summarizable
 from filing_threads import send_filing
 from issue_terms import needs_retry
 from followup_watch import dates_from_summary, refresh as refresh_followups, scope_for
@@ -585,107 +585,101 @@ def check_followups(api_key,state):
         lambda item,text:send_filing(state,item,text,tg_send,lambda s:save_state(STATE_FILE,s),token,chat,parse_mode=None),
         lambda s:save_state(STATE_FILE,s))
 
+def edit_existing_disclosure(state,item,text=None):
+    """Repair an existing message, never emit a second notification on edit failure."""
+    if DRY_RUN:return False
+    token=os.environ.get('TELEGRAM_BOT_TOKEN','');chat=os.environ.get('TELEGRAM_CHAT_ID','')
+    scope=scope_for(token,chat)
+    mid=state.get('filing_replies',{}).get(scope,{}).get('receipts',{}).get(item['rcept_no'],{}).get('message_id')
+    if not mid:return False
+    dates=dates_from_summary(text) if text else None
+    ref=prepare_buttons(state,scope,item,dates);register_message(state,scope,ref,mid)
+    save_state(STATE_FILE,state)
+    payload={'chat_id':chat,'message_id':mid,'reply_markup':keyboard(state,scope,ref)}
+    method='editMessageReplyMarkup'
+    if text:
+        if len(text.encode('utf-16-le'))//2>3800:return False
+        method='editMessageText';payload.update(text=text,parse_mode='HTML',disable_web_page_preview=True)
+    try:
+        data=requests.post(f'https://api.telegram.org/bot{token}/{method}',json=payload,timeout=(10,25)).json()
+        okay=data.get('ok') or 'message is not modified' in data.get('description','').lower()
+        if okay:
+            if text and dates:
+                from followup_watch import observe
+                family=state['filing_replies'][scope]['receipts'][item['rcept_no']].get('family',[item['rcept_no']])
+                observe(state,scope,item,family,dates)
+                save_state(STATE_FILE,state)
+            print('[EXISTING_MESSAGE_UPDATED]',item['rcept_no'],mid,method,
+                  'BUTTONS',sum(len(row) for row in payload['reply_markup']['inline_keyboard']))
+        else:print('[existing message edit unavailable]',item['rcept_no'],data.get('error_code'))
+        return bool(okay)
+    except Exception as exc:
+        print('[existing message edit unavailable]',item['rcept_no'],type(exc).__name__);return False
+
+def _pending_info(item, base):
+    return {'tries':0,'first_try':time.time(),'single_delivery':True,'base_msg':base,
+            'corp':item.get('corp_name',''),'code':item.get('stock_code',''),
+            'corp_code':item.get('corp_code',''),'rcept_dt':item.get('rcept_dt',''),
+            'title':item.get('report_nm','')}
+
+
+def _summary_ready(item,summary):
+    if not summary:return False
+    return not (ISSUE_RE.search(re.sub(r'\s+','',item.get('report_nm',''))) and needs_retry(summary))
+
+
+def _complete_card(item,base,summary):
+    head,_,link=base.rpartition('\n')
+    snap=stock_snapshot(item.get('stock_code','')) if item.get('stock_code') else None
+    return head+'\n'+summary+('\n'+snap if snap else '')+'\n'+link
+
+
 def poll_once(api_key: str, state: dict, cfg: dict) -> None:
-    watch = merged_watchlist(cfg)
-    seen: dict = state.setdefault("seen", {})
-    first_run = not seen
-    items = fetch_today_list(api_key, first_run, seen)
-    new_items = [it for it in items if it.get("rcept_no") and it["rcept_no"] not in seen]
-    if not new_items:
-        return
-
-    alerts = 0
-    for it in reversed(new_items):  # 오래된 것부터
-        seen[it["rcept_no"]] = it.get("rcept_dt", "")
-        if first_run:
-            continue  # 첫 가동은 현재 목록을 '본 것'으로만 등록 (알림 홍수 방지)
-        msg = classify(it, watch, cfg)
-        if msg:
-            summary = summarize(it, api_key)  # 탐지된 건만 내용 요약 (실패 시 None)
-            if summary:
-                head, _, link = msg.rpartition("\n")
-                msg = f"{head}\n{summary}\n{link}"
-                compact_title = re.sub(r"\s+", "", it.get("report_nm") or "")
-                if ISSUE_RE.search(compact_title) and needs_retry(summary):
-                    # Missing core terms are retried as one complete receipt-specific card.
-                    state.setdefault("pending_sum", {})[it["rcept_no"]] = {
-                        "tries": 0,
-                        "corp": it.get("corp_name", ""),
-                        "code": (it.get("stock_code") or "").strip(),
-                        "title": it.get("report_nm", ""),
-                        "corp_code":it.get('corp_code',''),"rcept_dt":it.get('rcept_dt',''),
-                    }
-            else:
-                if ISSUE_RE.search(re.sub(r'\s+','',it.get('report_nm',''))):
-                    head,_,link=msg.rpartition('\n')
-                    msg=f'{head}\n발행조건: 원문 확인 중 · 확인되면 이 알림에 답글로 보완합니다.\n{link}'
-                # 접수 직후엔 원문 파일·구조화 API 등록이 늦을 수 있다 — 알림은
-                # 먼저 보내고, 요약(규칙 또는 Gemini)은 데이터가 올라오는 대로
-                # 후속 메시지로 발송
-                state.setdefault("pending_sum", {})[it["rcept_no"]] = {
-                    "tries": 0,
-                    "corp": it.get("corp_name", ""),
-                    "code": (it.get("stock_code") or "").strip(),
-                    "corp_code": it.get("corp_code", ""),
-                    "rcept_dt": it.get("rcept_dt", ""),
-                    "title": it.get("report_nm", ""),
-                }
-            code = (it.get("stock_code") or "").strip()
-            if code:  # 어떤 공시든 회사 체급을 한 줄로 (📌 시총·PER·PBR·배당)
-                snap = stock_snapshot(code)
-                if snap:
-                    head, _, link = msg.rpartition("\n")
-                    msg = f"{head}\n{snap}\n{link}"
-            if not send_disclosure(state,it,msg):
-                seen.pop(it['rcept_no'],None)
-            alerts += 1
-            time.sleep(0.5)
-
-    if len(seen) > SEEN_CAP:  # 오래된 접수번호부터 정리
-        for k in sorted(seen, key=lambda x: seen[x])[: len(seen) - SEEN_CAP]:
-            del seen[k]
-    save_state(STATE_FILE, state)
-    print(f"[{now_kst():%H:%M:%S}] 신규 {len(new_items)}건 / 알림 {alerts}건"
-          f"{' (첫 가동 시드)' if first_run else ''}")
+    watch=merged_watchlist(cfg);seen=state.setdefault('seen',{});first_run=not seen
+    items=fetch_today_list(api_key,first_run,seen)
+    new_items=[it for it in items if it.get('rcept_no') and it['rcept_no'] not in seen]
+    for it in reversed(new_items):
+        rn=it['rcept_no'];seen[rn]=it.get('rcept_dt','')
+        if first_run:continue
+        base=classify(it,watch,cfg)
+        if not base:continue
+        summary=summarize(it,api_key)
+        if not _summary_ready(it,summary) and (summarizable(it.get('report_nm','')) or ISSUE_RE.search(re.sub(r'\s+','',it.get('report_nm','')))):
+            state.setdefault('pending_sum',{})[rn]=_pending_info(it,base)
+            save_state(STATE_FILE,state)
+            continue  # No placeholder, incomplete card, or first notification.
+        msg=_complete_card(it,base,summary) if summary else base
+        if not send_disclosure(state,it,msg):seen.pop(rn,None)
+    if len(seen)>SEEN_CAP:
+        for k in sorted(seen,key=lambda x:seen[x])[:len(seen)-SEEN_CAP]:del seen[k]
+    save_state(STATE_FILE,state)
 
 
 def retry_pending_summaries(api_key: str, state: dict) -> None:
-    """데이터 등록 지연으로 미뤄둔 요약을 재시도.
-    처음 10회는 매 사이클, 이후엔 5사이클마다, 실제 경과시간 3시간까지."""
-    pending: dict = state.get("pending_sum", {})
-    # Migrate legacy target-only retries to the complete terms card.
+    pending=state.setdefault('pending_sum',{})
     for rn,info in state.pop('pending_tgt',{}).items():
-        if rn[:8]<(now_kst()-timedelta(days=3)).strftime('%Y%m%d'):
-            continue  # Never dump a stale target-only backlog after upgrading.
-        pending.setdefault(rn,info)
-    state['pending_sum']=pending
-    for rcept_no, info in list(pending.items()):
-        if "title" not in info:      # 구버전 큐 항목은 정리
-            del pending[rcept_no]
-            continue
-        info["tries"] = info.get("tries", 0) + 1
+        if rn[:8]>=(now_kst()-timedelta(days=3)).strftime('%Y%m%d'):pending.setdefault(rn,info)
+    for rn,info in list(pending.items()):
+        if 'title' not in info:
+            del pending[rn];continue
         expired=time.time()-info.setdefault('first_try',time.time())>=3*3600
-        tries = info["tries"]
-        if tries > 10 and tries % 5 != 0:
-            continue
-        item = {"rcept_no": rcept_no, "report_nm": info.get("title", ""),
-                "stock_code": info.get("code", ""), "corp_code": info.get("corp_code", ""),
-                "corp_name": info.get("corp", ""), "rcept_dt": info.get("rcept_dt", "")}
-        summary = summarize(item, api_key)
-        if summary:
-            code = info.get("code", "")
-            code_tag = f" ({code})" if code else ""
-            sent=send_disclosure(state,item,f"🧾 <b>[요약] {esc(info.get('corp', ''))}</b>{code_tag}\n"
-                    f"{esc(info.get('title', ''))}\n{summary}\n{DART_VIEWER}{rcept_no}")
-            title_compact = re.sub(r"\s+", "", info.get("title", ""))
-            if sent and not (ISSUE_RE.search(title_compact) and needs_retry(summary)):
-                del pending[rcept_no]
-            elif expired:del pending[rcept_no]
-        elif expired:
-            print(f"[요약 보류] {rcept_no} — 원문 확인 실패 (3시간 경과)")
-            del pending[rcept_no]
-
-    save_state(STATE_FILE, state)
+        info['tries']=info.get('tries',0)+1
+        if info['tries']>10 and info['tries']%5 and not expired:continue
+        item={'rcept_no':rn,'report_nm':info['title'],'stock_code':info.get('code',''),
+              'corp_code':info.get('corp_code',''),'corp_name':info.get('corp',''),'rcept_dt':info.get('rcept_dt','')}
+        summary=summarize(item,api_key)
+        if _summary_ready(item,summary):
+            base=info.get('base_msg') or f"🧾 <b>{esc(item['corp_name'])}</b>\n{esc(item['report_nm'])}\n{DART_VIEWER}{rn}"
+            msg=_complete_card(item,base,summary)
+            # Old versions already sent a placeholder: update that message in place.
+            sent=send_disclosure(state,item,msg) if info.get('single_delivery') else edit_existing_disclosure(state,item,msg)
+            if sent:
+                del pending[rn];continue
+        if expired:
+            state.setdefault('unresolved_summaries',{})[rn]={**info,'status':'needs_review'}
+            del pending[rn]
+            print('[공시 발송 보류: 원문 요약 미완료]',rn)
+    save_state(STATE_FILE,state)
 
 
 def in_window() -> bool:

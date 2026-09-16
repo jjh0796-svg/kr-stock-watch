@@ -6,6 +6,10 @@ run-name: DART Watch (${{ inputs.trigger_source || github.event_name }})
 on:
   workflow_dispatch:
     inputs:
+      repair_messages:
+        description: "사용자가 보고한 기존 공시 2건에 버튼 추가·요약은 준비되면 같은 메시지 수정"
+        type: boolean
+        default: false
       verify_links:
         description: "지난 공시 3건으로 발행조건·답글만 검증"
         type: boolean
@@ -66,7 +70,7 @@ jobs:
             dart-state-
 
       - name: Run DART watch
-        if: ${{ inputs.verify_links != true }}
+        if: ${{ inputs.verify_links != true && inputs.repair_messages != true }}
         env:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -90,6 +94,14 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.DART_TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python verify_disclosures.py
+
+      - name: Repair existing disclosure messages
+        if: ${{ inputs.repair_messages == true }}
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.DART_TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python repair_disclosure_messages.py
 
       - name: Save seen state
         if: always()
