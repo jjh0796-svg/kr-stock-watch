@@ -1,0 +1,34 @@
+name: Disclosure original diagnostic
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - name: Fetch public original documents only
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+        run: |
+          python - <<'PY'
+          import os,pathlib
+          from issue_terms import fetch_xml
+          out=pathlib.Path('diagnostic-originals');out.mkdir()
+          for rn in ['20260916000188','20260916000191']:
+              raw=fetch_xml(os.environ['DART_API_KEY'],rn)
+              assert len(raw)>500
+              (out/(rn+'.xml')).write_text(raw,encoding='utf-8')
+              print('PUBLIC_ORIGINAL',rn,len(raw))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: diagnostic-originals
+          path: diagnostic-originals
+          retention-days: 3
