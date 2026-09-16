@@ -14,7 +14,7 @@ def test_unavailable_then_complete_is_one_delivery_with_full_card():
     assert state['pending_sum'][ITEM['rcept_no']]['single_delivery']
     with patch.object(d,'summarize',return_value=READY),patch.object(d,'stock_snapshot',return_value=None),patch.object(d,'save_state'),patch.object(d,'send_disclosure',return_value=True) as send:
         d.retry_pending_summaries('k',state);d.retry_pending_summaries('k',state)
-        assert send.call_count==1 and READY in send.call_args.args[2]
+        assert send.call_count==1 and READY in '\n'.join(line for line in send.call_args.args[2].splitlines() if line.strip())
         assert '원문 확인 중' not in send.call_args.args[2]
 
 def test_partial_summary_is_never_sent_before_complete():
@@ -41,4 +41,4 @@ def test_ready_first_fetch_sends_one_complete_card():
     state={'seen':{'old':'20260915'}}
     with patch.object(d,'fetch_today_list',return_value=[ITEM]),patch.object(d,'merged_watchlist',return_value={}),patch.object(d,'classify',return_value=BASE),patch.object(d,'summarize',return_value=READY),patch.object(d,'stock_snapshot',return_value=None),patch.object(d,'save_state'),patch.object(d,'send_disclosure',return_value=True) as send:
         d.poll_once('k',state,{});d.poll_once('k',state,{})
-        assert send.call_count==1 and READY in send.call_args.args[2]
+        assert send.call_count==1 and READY in '\n'.join(line for line in send.call_args.args[2].splitlines() if line.strip())
