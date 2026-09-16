@@ -13,6 +13,8 @@ ROWS=[
 def main():
     state=load_state(STATE_FILE,{})
     for rn,corp,code,title,expected in ROWS:
+        if os.environ.get('FORMAT_REQUIRE_COMPLETED'):
+            assert rn not in state.get('pending_sum',{}) and rn not in state.get('unresolved_summaries',{}), 'Message still being processed'
         item={'rcept_no':rn,'corp_name':corp,'stock_code':code,'corp_code':'','rcept_dt':'20260916','report_nm':title}
         summary=summarize(item,os.environ['DART_API_KEY'])
         assert _summary_ready(item,summary) and all(v in summary for v in expected), f'Summary validation failed {rn}'

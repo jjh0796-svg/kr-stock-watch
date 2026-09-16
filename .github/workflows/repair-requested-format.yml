@@ -1,0 +1,30 @@
+name: Repair requested disclosure format
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: repair-disclosure-format
+  cancel-in-progress: false
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - uses: actions/cache/restore@v4
+        with:
+          path: .state
+          key: dart-state-format-readonly-${{ github.run_id }}
+          restore-keys: dart-state-
+      - name: Edit only existing completed messages; never save production cache
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.DART_TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          FORMAT_REQUIRE_COMPLETED: '1'
+        run: python repair_requested_format.py
