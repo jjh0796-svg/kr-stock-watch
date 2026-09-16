@@ -1,6 +1,12 @@
 name: Repair requested disclosure format
 on:
   workflow_dispatch:
+    inputs:
+      target:
+        description: Existing messages to edit
+        type: choice
+        options: [original, kcc]
+        default: original
 permissions:
   contents: read
 concurrency:
@@ -27,4 +33,5 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.DART_TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           FORMAT_REQUIRE_COMPLETED: '1'
+          FORMAT_TARGET: ${{ inputs.target }}
         run: python repair_requested_format.py

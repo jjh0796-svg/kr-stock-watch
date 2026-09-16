@@ -33,5 +33,5 @@ def test_supply_annualization_actual_contract():
     text=re.sub(r'\s+',' ',html.unescape(re.sub('<[^>]+>',' ',raw)))
     with patch.object(summarize,'_doc_text',return_value=text):
         out=summarize._sum_supply('','')
-    for value in ['46.7억원 (매출대비 2.4%)','33개월','소프트웨어 통합 유지보수','30일이내','부가세 제외','단순 연환산']:
+    for value in ['46.7억원 (매출대비 2.4%)','33개월','소프트웨어 통합 유지보수','30일이내','부가세 제외']:
         assert value in out

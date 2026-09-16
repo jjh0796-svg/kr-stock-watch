@@ -400,6 +400,7 @@ def _sum_supply(api_key: str, rcept_no: str, ctx: dict | None = None) -> str | N
     if payment:lines.append(f"대금지급: {payment}")
     if 'VAT를 제외' in text or 'VAT 제외' in text:lines.append('금액 기준: 부가세 제외')
     if total is not None:
+        if lines:lines.append("")
         line = f"금액: {_eok(total)}"
         if ratio is not None:
             line += f" (매출대비 {ratio:.1f}%)"
@@ -422,7 +423,6 @@ def _sum_supply(api_key: str, rcept_no: str, ctx: dict | None = None) -> str | N
                 line=f'연환산 금액: {annual/100000000:,.1f}억원'
                 if annual_ratio is not None:line+=f' (매출대비 {annual_ratio:.1f}%)'
                 lines.append(line)
-                lines.append('※ 계약 일수 기준 단순 연환산 · 실제 연간 매출 인식과 다를 수 있음')
         except ValueError:
             pass
         lines.append(f"기간: {beg} ~ {end}{duration}")

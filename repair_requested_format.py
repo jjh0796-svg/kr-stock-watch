@@ -12,13 +12,18 @@ ROWS=[
 
 def main():
     state=load_state(STATE_FILE,{})
-    for rn,corp,code,title,expected in ROWS:
+    rows=ROWS
+    if os.environ.get('FORMAT_TARGET')=='kcc':
+        rows=[('20260916900511','KCC건설','021320','[기재정정]단일판매ㆍ공급계약체결(자율공시)',['27.6억원','매출대비 0.4%','7,415일'])]
+    for rn,corp,code,title,expected in rows:
         if os.environ.get('FORMAT_REQUIRE_COMPLETED'):
             assert rn not in state.get('pending_sum',{}) and rn not in state.get('unresolved_summaries',{}), 'Message still being processed'
         item={'rcept_no':rn,'corp_name':corp,'stock_code':code,'corp_code':'','rcept_dt':'20260916','report_nm':title}
         summary=summarize(item,os.environ['DART_API_KEY'])
         assert _summary_ready(item,summary) and all(v in summary for v in expected), f'Summary validation failed {rn}'
         base=f'🧾 <b>{corp} ({code})</b>\n{title}\nhttps://dart.fss.or.kr/dsaf001/main.do?rcpNo={rn}'
+        if os.environ.get('FORMAT_TARGET')=='kcc':
+            base=f'🌐📝 <b>[단일판매ㆍ공급계약체결·전체] (코스닥){corp} ({code})</b>\n{title}\nhttps://dart.fss.or.kr/dsaf001/main.do?rcpNo={rn}'
         message=_complete_card(item,base,summary)
         assert len(message.encode('utf-16-le'))//2<=3800
         assert edit_existing_disclosure(state,item,message), f'Existing message edit failed {rn}'

@@ -631,7 +631,9 @@ def _summary_ready(item,summary):
 def _complete_card(item,base,summary):
     head,_,link=base.rpartition('\n')
     snap=stock_snapshot(item.get('stock_code','')) if item.get('stock_code') else None
-    return head+'\n'+summary+('\n'+snap if snap else '')+'\n'+link
+    body=head.rstrip()+'\n\n'+summary.strip()
+    footer='\n'.join(part for part in (snap,link) if part)
+    return body+('\n\n'+footer if footer else '')
 
 
 def poll_once(api_key: str, state: dict, cfg: dict) -> None:
