@@ -78,15 +78,81 @@ def subsidiary_summary(raw):
     total=sum(v for _,v in purposes)
     total_eok=(total/Decimal(100000000)).quantize(Decimal('.01'),rounding=ROUND_HALF_UP)
     lines=['<b>발행조건 · 종속회사 원문 기준</b>',f'출자 대상 회사: {html.escape(company)}',
-           f'방식: {method} · 해외 종속회사 지분출자',f'조달금액(원화 환산): {total_eok:,.2f}억원',
+           f'방식: {method} · 해외 종속회사 지분출자',f'조달금액(원화 환산): {eok_amount(total)}',
            '신주·주당 발행가액: 원문 미기재(주식으로 나누지 않는 자본금 구조)',
            '대상: 기존 주주(공시상 주주배정 방식)',f'납입일: {due} (최종 예정일)',
-           '자금용도: '+' · '.join(f'{k} {v/Decimal(100000000):,.2f}억원' for k,v in purposes)]
+           '자금용도: '+' · '.join(f'{k} {eok_amount(v)}' for k,v in purposes)]
     currency=re.search(r'유상증자 금액\(([^)]+)\)',note)
     if currency:lines.append('원통화 금액: '+html.escape(currency[1])+' · 실제 원화액은 납입 시 환율에 따라 달라질 수 있음')
     installments=re.findall(r'\d+차\)\s*CNY\s*[\d.]+억\s*\(20\d{2}년\s*\d+월\s*\d+일\)',note)
     if installments:lines.append('분납 일정(공시 기재):\n'+'\n'.join(html.escape(x) for x in installments))
     return '\n'.join(lines)
+
+def eok_amount(value):
+    n=number(str(value))
+    if n is None:return '미확인'
+    rounded=(n/Decimal(100000000)).quantize(Decimal('.1'),rounding=ROUND_HALF_UP)
+    return f'{rounded:,.1f}억원'
+
+
+def fund_investors(raw,fields,total):
+    rows=TableRows();rows.feed(raw)
+    funds={}
+    for row in rows.rows:
+        match=re.fullmatch(r'본건\s*펀드\s*(\d+)',row[0])
+        if match and len(row)==4:
+            funds[int(match[1])]=(row[1],row[2])
+    names=fields.get('ISSU_NM',[]);amounts=fields.get('ISSU_AMT',[])
+    if not funds or len(names)!=len(amounts):return None
+    groups={};summed=Decimal(0);used=set()
+    for name,amount in zip(names,amounts):
+        m=re.search(r'본건\s*펀드\s*([\d,\s]+)의',name)
+        n=number(amount)
+        if not m or n is None:return None
+        ids=[int(x) for x in re.findall(r'\d+',m[1])]
+        if not ids or any(i not in funds or i in used for i in ids):return None
+        managers={funds[i][1] for i in ids}
+        if len(managers)!=1:return None  # pooled amount cannot be divided by guesswork
+        manager=managers.pop();group=groups.setdefault(manager,{'amount':Decimal(0),'funds':[]})
+        group['amount']+=n;group['funds'].extend(funds[i][0] for i in ids)
+        summed+=n;used.update(ids)
+    if summed!=number(total):return None
+    lines=['<b>투자 펀드 · 운용사별 인수금액</b>']
+    for manager,group in sorted(groups.items(),key=lambda x:-x[1]['amount']):
+        manager=re.sub(r'주식회사\s*|\s*주식회사','',manager).strip()
+        lines.append('• '+html.escape(manager)+' '+eok_amount(group['amount']))
+        lines.extend('  └ '+html.escape(name) for name in group['funds'])
+    lines.append('※ 운용사별 합산액 · 여러 펀드 묶음의 개별 배분액은 추정하지 않음')
+    return lines
+
+
+def conversion_premium(text):
+    m=re.search(r'기준주가의\s*(\d+(?:\.\d+)?)\s*%',text)
+    if not m:return None
+    pct=Decimal(m[1])-100
+    if pct==0:return '기준주가 대비: 동일 (0.0%)'
+    return f'기준주가 대비: {abs(pct):.1f}% '+('할증' if pct>0 else '할인')+' (공시 산식 기준)'
+
+
+def option_lines(option):
+    lines=[]
+    matches=list(re.finditer(r'(Put|Call)\s*Option',option,re.I))
+    for i,m in enumerate(matches):
+        part=option[m.end():matches[i+1].start() if i+1<len(matches) else len(option)]
+        years=re.findall(r'발행일로부터\s*(\d+(?:\.\d+)?)년',part)
+        is_put=m[1].lower()=='put'
+        label='사채권자 조기상환(풋)' if is_put else '발행사 등 권리(콜)'
+        if is_put and years:
+            every=re.search(r'매\s*(\d+)개월',part)
+            lines.append(label+': 발행 '+years[0]+'년 후'+('부터 '+every[1]+'개월마다' if every else ''))
+        elif not is_put and len(years)>=2:
+            day=re.search(r'매월의\s*(\d+)일',part)
+            limit=re.search(r'전자등록총액의\s*(\d+(?:\.\d+)?)%',part)
+            lines.append(label+': 발행 '+years[0]+'~'+years[1]+'년'+(' · 매월 '+day[1]+'일' if day else '')+(' · 한도 '+limit[1]+'%' if limit else ''))
+        elif not any(line.startswith(label+':') for line in lines):
+            lines.append(label+': 조항 있음 · 세부 조건 원문 참고')
+    return list(dict.fromkeys(lines)) or ['풋·콜옵션: 원문 참고']
+
 
 def summarize_xml(raw,title):
     parser=Fields();parser.feed(raw);f=parser.fields
@@ -98,7 +164,7 @@ def summarize_xml(raw,title):
     def show(value,suffix=''):return html.escape(value+suffix) if value else '미확인'
     def amount(value):
         n=number(value)
-        return f'{n/Decimal(100000000):,.2f}억원 ({n:,.0f}원)' if n is not None else '미확인'
+        return eok_amount(value)
     bond=any(s in title for s in ('전환사채','교환사채','신주인수권부사채'))
     funds=[(label,get(key)) for label,key in [('시설','FND_USE1'),('영업양수','FND_USE_SQ'),('운영','FND_USE2'),('채무상환','FND_USE_RD'),('타법인 증권취득','ANC_ACQ_PRC' if bond else 'ANC_ACQ_AMT'),('기타','FND_USE3')]]
     purposes=[(label,number(v)) for label,v in funds if number(v) is not None and number(v)>0]
@@ -115,17 +181,18 @@ def summarize_xml(raw,title):
                   f"표면/만기 이자율: {show(get('PRFT_RATE'),'%')} / {show(get('LST_RTN_RT'),'%')}",
                   f"납입일: {show(get('PYM_DT'))} · 만기일: {show(get('EXP_DT'))}",
                   f"{label}청구: {show(get('SB_BGN_DT'))} ~ {show(get('SB_END_DT'))}"]
+        premium=conversion_premium(get('EXE_FUNC'))
+        if premium:lines.insert(4,premium)
+        lines.insert(2,'')
+        lines.append('')
         minimum=get('MIN_PRC')
-        if minimum:lines.append(f'가격조정 최저가: {show(minimum,"원")}')
-        elif get('EXE_REG'):lines.append('가격조정: 조항 있음 · 최저가 숫자는 미확인, 원문 확인')
-        option=get('OPT_FCT')
-        for label,pattern in [('사채권자 조기상환(풋)',r'Put\s*Option'),('발행사 등 권리(콜)',r'Call\s*Option')]:
-            match=re.search(pattern,option,re.I)
-            if match:
-                excerpt=option[match.start():match.start()+170]
-                lines.append(label+': '+html.escape(excerpt)+'… [원문 일부]')
-        if not option:lines.append('풋·콜옵션: 미확인 · 원문 확인')
-        elif not re.search(r'(Put|Call)\s*Option',option,re.I):lines.append('옵션 기타사항: '+html.escape(option[:200])+'… [원문 일부]')
+        adjustment=get('EXE_REG')
+        if re.search(r'시가의\s*상승\s*및\s*하락에\s*따른\s*조정은\s*없',adjustment):
+            lines.append('가격조정: 시가 변동에 따른 리픽싱 없음 (증자·분할 등 조정 별도)')
+        elif minimum:lines.append(f'가격조정 최저가: {show(minimum,"원")}')
+        elif adjustment:lines.append('가격조정: 조항 있음 · 세부 조건 원문 참고')
+        lines.extend(option_lines(get('OPT_FCT')))
+
     else:
         total=sum((n for _,n in purposes),Decimal(0))
         lines += [f"방식: {show(get('CI_MTH'))}",f'조달금액(자금용도 합계): {amount(str(total)) if purposes else "미확인"}',
@@ -134,8 +201,13 @@ def summarize_xml(raw,title):
                   f"할인·할증률: {show(get('DC_RATE'),'%')} (원문 부호 유지)",
                   f"납입일: {show(get('PYM_DT'))} · 상장예정: {show(get('LST_PLN_DT'))}"]
         if get('ETC'):lines.append('배정 비고: '+show(get('ETC')[:160]))
-    lines.append('대상: '+(' / '.join(html.escape(v) for v in targets[:6])+(f' 외 {len(targets)-6}곳' if len(targets)>6 else '') if targets else '미확인'))
+    investors=fund_investors(raw,f,get('DNM_SUM')) if bond else None
+    lines.append('')
     lines.append('자금용도: '+(' · '.join(label+' '+amount(str(n)) for label,n in purposes) if purposes else '미확인'))
+    if investors:
+        lines.extend(['']+investors)
+    else:
+        lines.append('대상: '+(' / '.join(html.escape(v) for v in targets[:6])+(f' 외 {len(targets)-6}곳' if len(targets)>6 else '') if targets else '미확인'))
     return '\n'.join(lines)
 
 def issuance_summary(item,key):

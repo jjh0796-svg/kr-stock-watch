@@ -6,6 +6,10 @@ run-name: DART Watch (${{ inputs.trigger_source || github.event_name }})
 on:
   workflow_dispatch:
     inputs:
+      repair_format:
+        description: "사용자가 지정한 9/16 공시 3건의 금액·연환산·펀드 표시 수정 (새 발송 없음)"
+        type: boolean
+        default: false
       repair_messages:
         description: "사용자가 보고한 기존 공시 2건에 버튼 추가·요약은 준비되면 같은 메시지 수정"
         type: boolean
@@ -70,7 +74,7 @@ jobs:
             dart-state-
 
       - name: Run DART watch
-        if: ${{ inputs.verify_links != true && inputs.repair_messages != true }}
+        if: ${{ inputs.verify_links != true && inputs.repair_messages != true && inputs.repair_format != true }}
         env:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -102,6 +106,14 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.DART_TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python repair_disclosure_messages.py
+
+      - name: Repair requested display format
+        if: ${{ inputs.repair_format == true }}
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.DART_TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python repair_requested_format.py
 
       - name: Save seen state
         if: always()

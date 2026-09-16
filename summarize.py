@@ -388,9 +388,17 @@ def _sum_supply(api_key: str, rcept_no: str, ctx: dict | None = None) -> str | N
     lines = []
     if what:
         lines.append(f"계약: {what}")
+    product = _clip(re.search(r'(?:공급품목|계약품목|공급물품)\s*[:：]?\s*(.+?)\s*(?:\d+\.|계약금액|계약기간)', text), 140)
+    if product:
+        lines.append(f"공급품목·용역: {product}")
+    elif what:
+        lines.append(f"공급품목·용역: {what} (공시 계약명 기준)")
     if party or region:
         seg = [f"상대: {party}" if party else None, f"지역: {region}" if region else None]
         lines.append(" · ".join(s for s in seg if s))
+    payment = _clip(re.search(r'대금지급\s*조건\s*등\s*(.+?)\s*7\.', text), 100)
+    if payment:lines.append(f"대금지급: {payment}")
+    if 'VAT를 제외' in text or 'VAT 제외' in text:lines.append('금액 기준: 부가세 제외')
     if total is not None:
         line = f"금액: {_eok(total)}"
         if ratio is not None:
@@ -400,14 +408,24 @@ def _sum_supply(api_key: str, rcept_no: str, ctx: dict | None = None) -> str | N
         lines.append(line)
     if period:
         beg, end = period.group(1), period.group(2)
-        months = ""
+        duration = ''
         try:
-            b = (int(beg[:4]), int(beg[5:7]))
-            e = (int(end[:4]), int(end[5:7]))
-            months = f" ({(e[0] - b[0]) * 12 + e[1] - b[1]}개월)"
+            start_date=datetime.strptime(beg,'%Y-%m-%d')
+            end_date=datetime.strptime(end,'%Y-%m-%d')
+            days=(end_date-start_date).days+1
+            exclusive=end_date+timedelta(days=1)
+            months=(exclusive.year-start_date.year)*12+exclusive.month-start_date.month
+            duration=f' ({months}개월)' if exclusive.day==start_date.day else f' ({days:,}일)'
+            if total is not None and days>0:
+                annual=total*365/days
+                annual_ratio=annual/sales*100 if sales and sales>0 else (ratio*365/days if ratio is not None else None)
+                line=f'연환산 금액: {annual/100000000:,.1f}억원'
+                if annual_ratio is not None:line+=f' (매출대비 {annual_ratio:.1f}%)'
+                lines.append(line)
+                lines.append('※ 계약 일수 기준 단순 연환산 · 실제 연간 매출 인식과 다를 수 있음')
         except ValueError:
             pass
-        lines.append(f"기간: {beg} ~ {end}{months}")
+        lines.append(f"기간: {beg} ~ {end}{duration}")
     return "\n".join(lines) if lines else None
 
 
