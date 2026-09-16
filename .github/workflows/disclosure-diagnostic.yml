@@ -18,14 +18,21 @@ jobs:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
         run: |
           python - <<'PY'
-          import os,pathlib
+          import os,pathlib,requests,re
           from issue_terms import fetch_xml
           out=pathlib.Path('diagnostic-originals');out.mkdir()
           for rn in ['20260916000188','20260916000191']:
-              raw=fetch_xml(os.environ['DART_API_KEY'],rn)
-              assert len(raw)>500
+              try:raw=fetch_xml(os.environ['DART_API_KEY'],rn)
+              except Exception as exc:raw=type(exc).__name__
               (out/(rn+'.xml')).write_text(raw,encoding='utf-8')
               print('PUBLIC_ORIGINAL',rn,len(raw))
+              headers={'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36','Referer':'https://dart.fss.or.kr/','Connection':'close'}
+              main=requests.get('https://dart.fss.or.kr/dsaf001/main.do',params={'rcpNo':rn},headers=headers,timeout=25)
+              (out/(rn+'.main.html')).write_text(main.text,encoding='utf-8')
+              for vals in re.findall(r"viewDoc\('([^']*)',\s*'([^']*)',\s*'([^']*)',\s*'([^']*)',\s*'([^']*)',\s*'([^']*)'",main.text)[:3]:
+                  params=dict(zip(['rcpNo','dcmNo','eleId','offset','length','dtd'],vals))
+                  doc=requests.get('https://dart.fss.or.kr/report/viewer.do',params=params,headers=headers,timeout=25)
+                  (out/(rn+'.viewer.html')).write_text(doc.text,encoding='utf-8')
           PY
       - uses: actions/upload-artifact@v4
         with:
