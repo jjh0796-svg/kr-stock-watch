@@ -38,7 +38,7 @@ def esc(s: str) -> str:
 # 주의: 읽기 타임아웃은 "서버 도착 후 응답만 유실"로 간주하고 재시도하지 않는다.
 # (재시도했다가 같은 메시지가 12통 도착한 사고 이력 있음 — 연결 실패만 재시도)
 
-def tg_send(text: str, *, parse_mode='HTML', reply_to_message_id=None) -> int | bool:
+def tg_send(text: str, *, parse_mode='HTML', reply_to_message_id=None, reply_markup=None) -> int | bool:
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
     if DRY_RUN or not token or not chat_id:
@@ -53,6 +53,7 @@ def tg_send(text: str, *, parse_mode='HTML', reply_to_message_id=None) -> int | 
         "disable_web_page_preview": True,
     }
     if parse_mode:payload['parse_mode']=parse_mode
+    if reply_markup is not None:payload['reply_markup']=reply_markup
     if reply_to_message_id is not None:
         payload['reply_parameters']={'message_id':reply_to_message_id,'allow_sending_without_reply':True}
     for attempt in range(2):

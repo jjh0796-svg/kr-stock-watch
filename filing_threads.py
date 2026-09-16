@@ -30,7 +30,7 @@ def related_receipts(receipt):
         print('[DART family unavailable]',receipt,type(e).__name__)
         return [receipt]
 
-def send_filing(state,item,text,sender,save,token,chat,*,parse_mode='HTML',dry_run=False,followup_dates=None):
+def send_filing(state,item,text,sender,save,token,chat,*,parse_mode='HTML',dry_run=False,followup_dates=None,reply_markup=None):
     receipt=item['rcept_no']
     if dry_run:return sender(text,parse_mode=parse_mode)
     scope=hashlib.sha256(f'{token}|{chat}'.encode()).hexdigest()
@@ -52,11 +52,12 @@ def send_filing(state,item,text,sender,save,token,chat,*,parse_mode='HTML',dry_r
             delivered=book['deliveries'][key]
             if delivered=='uncertain':return True  # never automatically repeat ambiguous delivery
             parent=delivered;continue
-        result=sender(chunk,parse_mode=parse_mode,reply_to_message_id=parent)
+        extra={'reply_markup':reply_markup} if reply_markup is not None and i==len(chunks)-1 else {}
+        result=sender(chunk,parse_mode=parse_mode,reply_to_message_id=parent,**extra)
         if not result:return False
         if type(result) is int:
             book['seq']+=1;parent=result
-            receipts[receipt]={'message_id':result,'seq':book['seq']}
+            receipts[receipt]={'message_id':result,'seq':book['seq'],'family':family}
             book['deliveries'][key]=result
         else:
             book['deliveries'][key]='uncertain';acknowledged=False

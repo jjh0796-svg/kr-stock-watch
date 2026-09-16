@@ -66,7 +66,7 @@ def refresh(state,scope,key,send,save,*,today=None,fetch=fetch_company,family_lo
     events=state.get('followup_events',{}).get(scope,{})
     for e in events.values():
         if (today-date.fromisoformat(e['created'])).days>90:e['active']=False
-    eligible=[e for e in events.values() if e.get('active') and e.get('corp_code')]
+    eligible=[e for e in events.values() if e.get('active') and e.get('user_tracking',True) and e.get('corp_code')]
     attempts=state.setdefault('followup_scan_attempts',{}).setdefault(scope,{})
     hour=stamp+':'+str(datetime.now(KST).hour)
     corps=[]
@@ -116,7 +116,7 @@ def refresh(state,scope,key,send,save,*,today=None,fetch=fetch_company,family_lo
             save(state)
     sent=0
     for e in events.values():
-        if not e.get('active') or e.get('checked')!=stamp:continue
+        if not e.get('active') or not e.get('user_tracking',True) or e.get('mute_reminders') or e.get('checked')!=stamp:continue
         for kind,raw in e.get('dates',{}).items():
             if not raw:continue
             due=date.fromisoformat(raw);delta=(due-today).days

@@ -30,6 +30,7 @@ from summarize import company_card, stock_snapshot, summarize
 from filing_threads import send_filing
 from issue_terms import needs_retry
 from followup_watch import dates_from_summary, refresh as refresh_followups, scope_for
+from message_buttons import prepare as prepare_buttons, keyboard, register_message, handle_callback
 
 ISSUE_RE = re.compile(r"유상증자결정|유무상증자결정|사채권발행결정")  # 발행대상이 있는 서식
 
@@ -411,7 +412,7 @@ def register_menu() -> None:
         print(f"[TG] setMyCommands 실패: {e}")
 
 
-def process_commands(cfg: dict, wait: int = 0) -> bool:
+def process_commands(cfg: dict, wait: int = 0, state=None) -> bool:
     """봇 대화방의 새 메시지를 명령으로 처리. 설정이 바뀌면 True.
 
     wait>0 이면 텔레그램 롱폴링으로 최대 wait초 대기 — 메시지가 오는 즉시
@@ -434,7 +435,8 @@ def process_commands(cfg: dict, wait: int = 0) -> bool:
         cfg["tg_token_tail"] = tail
     try:
         r = requests.get(f"https://api.telegram.org/bot{token}/getUpdates",
-                         params={"offset": cfg.get("tg_offset", 0) + 1, "timeout": wait},
+                         params={"offset": cfg.get("tg_offset", 0) + 1, "timeout": wait,
+                                 "allowed_updates": '["message","edited_message","callback_query"]'},
                          timeout=(10, wait + 15))
         updates = r.json().get("result", [])
     except Exception as e:
@@ -444,6 +446,16 @@ def process_commands(cfg: dict, wait: int = 0) -> bool:
 
     changed = False
     for up in updates:
+        if up.get('callback_query'):
+            try:
+                handle_callback(state if state is not None else load_state(STATE_FILE,{}),up['callback_query'],token,chat_id,
+                                lambda s:save_state(STATE_FILE,s))
+            except Exception as exc:
+                print('[button save failed; update retained]',type(exc).__name__)
+                break
+            cfg['tg_offset']=max(cfg.get('tg_offset',0),up.get('update_id',0))
+            changed=True
+            continue
         cfg["tg_offset"] = max(cfg.get("tg_offset", 0), up.get("update_id", 0))
         changed = True  # offset 전진도 저장 대상
         msg = up.get("message") or up.get("edited_message") or {}
@@ -553,9 +565,18 @@ def classify(item: dict, watch: dict[str, str], cfg: dict) -> str | None:
 
 
 def send_disclosure(state,item,text):
-    return send_filing(state,item,text,tg_send,lambda s:save_state(STATE_FILE,s),
-                       os.environ.get('TELEGRAM_BOT_TOKEN',''),os.environ.get('TELEGRAM_CHAT_ID',''),dry_run=DRY_RUN,
-                       followup_dates=dates_from_summary(text) if ISSUE_RE.search(re.sub(r'\s+','',item.get('report_nm',''))) else None)
+    token=os.environ.get('TELEGRAM_BOT_TOKEN','');chat=os.environ.get('TELEGRAM_CHAT_ID','')
+    dates=dates_from_summary(text) if ISSUE_RE.search(re.sub(r'\s+','',item.get('report_nm',''))) else None
+    if DRY_RUN:return send_filing(state,item,text,tg_send,lambda s:None,token,chat,dry_run=True)
+    scope=scope_for(token,chat);ref=prepare_buttons(state,scope,item,dates)
+    save_state(STATE_FILE,state)
+    def sender(body,**kwargs):
+        result=tg_send(body,**kwargs)
+        if kwargs.get('reply_markup') and type(result) is int:
+            register_message(state,scope,ref,result);save_state(STATE_FILE,state)
+        return result
+    return send_filing(state,item,text,sender,lambda s:save_state(STATE_FILE,s),token,chat,
+                       followup_dates=dates,reply_markup=keyboard(state,scope,ref))
 
 def check_followups(api_key,state):
     if DRY_RUN:return
@@ -689,7 +710,7 @@ def main() -> None:
     register_menu()
 
     # 시작 직후 밀린 명령 먼저 처리
-    if process_commands(cfg):
+    if process_commands(cfg,state=state):
         save_watch_config(cfg)
 
     while True:
@@ -698,7 +719,7 @@ def main() -> None:
             # 잡 시간을 채운다 (2026-08-29 — 주말에도 종목·유형 변경이 즉시 반영되게).
             print(f"[{now_kst():%a %H:%M}] 감시 시간대 밖 — 명령 접수 모드")
             while time.monotonic() < deadline:
-                if process_commands(cfg, wait=int(min(50, max(deadline - time.monotonic(), 1)))):
+                if process_commands(cfg, wait=int(min(50, max(deadline - time.monotonic(), 1))),state=state):
                     save_watch_config(cfg)
             break
         try:
@@ -711,7 +732,7 @@ def main() -> None:
         if remaining <= 0:
             break
         # DART 폴링 사이 대기 = 텔레그램 롱폴링 (명령 오면 즉시 처리)
-        if process_commands(cfg, wait=int(min(POLL_INTERVAL, max(remaining, 1)))):
+        if process_commands(cfg, wait=int(min(POLL_INTERVAL, max(remaining, 1))),state=state):
             save_watch_config(cfg)
 
 
