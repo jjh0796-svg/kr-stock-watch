@@ -154,26 +154,12 @@ HELP = (
     "/스파이크추가 005930 또는 종목명 · /스파이크삭제 · /스파이크목록  (영문: /spike /spike_del /spikes)\n"
     "\n"
     "📢 공시감시(DART)는 별도 봇: '안녕하재 공시모니터링'\n"
-    "→ @filingsmonitor_0796_bot 에서 /추가·/목록·/유형 등 사용\n\n"
-    "🧭 투자 판단 도구: /자료종합 · /관심이유 · /관심점검 · /실적변화 · /해외연결\n"
-    "/투자도움말 에서 등록 방법 확인"
+    "→ @filingsmonitor_0796_bot 에서 /추가·/목록·/유형 등 사용"
 )
 
 
 def handle(text):
     """명령 처리 → 응답 문자열."""
-    # The research worker shares local state, never consumes Telegram updates itself.
-    research_path = Path(os.environ.get("RESEARCH_CODE_DIR", str(Path.home() / "codex")))
-    if research_path.is_dir() and str(research_path) not in sys.path:
-        sys.path.append(str(research_path))
-    try:
-        from investment_monitor.commands import handle as research_handle
-    except ImportError:
-        research_handle = None
-    if research_handle:
-        response = research_handle(text, parse_target)
-        if response is not None:
-            return response
     parts = text.strip().split()
     if not parts:
         return None
@@ -254,11 +240,6 @@ def handle(text):
 
 
 MY_MENU = [
-    ("research", "🧩 여러 자료 종합 (=/자료종합)"),
-    ("review", "🎯 관심 이유 점검 (=/관심점검)"),
-    ("changes", "🗣 실적발언 변화 (=/실적변화)"),
-    ("links", "🌐 해외기업 연결 (=/해외연결)"),
-    ("research_help", "🧭 투자 도구 사용법"),
     ("hold", "💼 보유 추가 — 전 봇 마킹·알림 승격 (=/보유추가)"),
     ("holds", "💼 보유 목록 (=/보유목록)"),
     ("hold_del", "💼 보유 삭제 (=/보유삭제)"),
@@ -304,18 +285,9 @@ def main():
                     continue
                 reply = handle(text)
                 if reply:
-                    # Long research replies are plain text, split without HTML damage.
-                    parent = msg.get("message_id")
-                    for start in range(0, len(reply), 2000):
-                        response = requests.post(f"{api}/sendMessage",
-                                      json={"chat_id": chat_id, "text": reply[start:start+2000],
-                                            "reply_parameters": {"message_id": parent, "allow_sending_without_reply": True}},
-                                      timeout=20)
-                        response.raise_for_status()
-                        result = response.json()
-                        if not result.get("ok"):
-                            raise RuntimeError("Telegram rejected command reply")
-                        parent = result["result"]["message_id"]
+                    requests.post(f"{api}/sendMessage",
+                                  json={"chat_id": chat_id, "text": reply},
+                                  timeout=20)
         except Exception as e:
             print(f"[warn] {e}")
             time.sleep(10)
