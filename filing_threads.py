@@ -30,7 +30,7 @@ def related_receipts(receipt):
         print('[DART family unavailable]',receipt,type(e).__name__)
         return [receipt]
 
-def send_filing(state,item,text,sender,save,token,chat,*,parse_mode='HTML',dry_run=False):
+def send_filing(state,item,text,sender,save,token,chat,*,parse_mode='HTML',dry_run=False,followup_dates=None):
     receipt=item['rcept_no']
     if dry_run:return sender(text,parse_mode=parse_mode)
     scope=hashlib.sha256(f'{token}|{chat}'.encode()).hexdigest()
@@ -45,6 +45,7 @@ def send_filing(state,item,text,sender,save,token,chat,*,parse_mode='HTML',dry_r
         text=html.unescape(re.sub('<[^>]+>','',text));parse_mode=None
         chunks=[text[i:i+1800] for i in range(0,len(text),1800)]
     else:chunks=[text]
+    acknowledged=True
     for i,chunk in enumerate(chunks):
         key=digest+':'+str(i)
         if key in book['deliveries']:
@@ -57,6 +58,11 @@ def send_filing(state,item,text,sender,save,token,chat,*,parse_mode='HTML',dry_r
             book['seq']+=1;parent=result
             receipts[receipt]={'message_id':result,'seq':book['seq']}
             book['deliveries'][key]=result
-        else:book['deliveries'][key]='uncertain'
+        else:
+            book['deliveries'][key]='uncertain';acknowledged=False
+        save(state)
+    if acknowledged and followup_dates is not None:
+        from followup_watch import observe
+        observe(state,scope,item,family,followup_dates)
         save(state)
     return True

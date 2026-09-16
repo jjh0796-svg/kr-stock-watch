@@ -29,6 +29,7 @@ from common import (DRY_RUN, UA_HEADERS, esc, load_state, load_watch_config,
 from summarize import company_card, stock_snapshot, summarize
 from filing_threads import send_filing
 from issue_terms import needs_retry
+from followup_watch import dates_from_summary, refresh as refresh_followups, scope_for
 
 ISSUE_RE = re.compile(r"유상증자결정|유무상증자결정|사채권발행결정")  # 발행대상이 있는 서식
 
@@ -553,7 +554,15 @@ def classify(item: dict, watch: dict[str, str], cfg: dict) -> str | None:
 
 def send_disclosure(state,item,text):
     return send_filing(state,item,text,tg_send,lambda s:save_state(STATE_FILE,s),
-                       os.environ.get('TELEGRAM_BOT_TOKEN',''),os.environ.get('TELEGRAM_CHAT_ID',''),dry_run=DRY_RUN)
+                       os.environ.get('TELEGRAM_BOT_TOKEN',''),os.environ.get('TELEGRAM_CHAT_ID',''),dry_run=DRY_RUN,
+                       followup_dates=dates_from_summary(text) if ISSUE_RE.search(re.sub(r'\s+','',item.get('report_nm',''))) else None)
+
+def check_followups(api_key,state):
+    if DRY_RUN:return
+    token=os.environ.get('TELEGRAM_BOT_TOKEN','');chat=os.environ.get('TELEGRAM_CHAT_ID','')
+    refresh_followups(state,scope_for(token,chat),api_key,
+        lambda item,text:send_filing(state,item,text,tg_send,lambda s:save_state(STATE_FILE,s),token,chat,parse_mode=None),
+        lambda s:save_state(STATE_FILE,s))
 
 def poll_once(api_key: str, state: dict, cfg: dict) -> None:
     watch = merged_watchlist(cfg)
@@ -695,6 +704,7 @@ def main() -> None:
         try:
             poll_once(api_key, state, cfg)
             retry_pending_summaries(api_key, state)
+            check_followups(api_key,state)
         except Exception as e:  # 일시 오류로 잡 전체가 죽지 않게
             print(f"[폴링 오류] {type(e).__name__}: {e}")
         remaining = deadline - time.monotonic()
