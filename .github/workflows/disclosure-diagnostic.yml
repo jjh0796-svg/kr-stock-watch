@@ -21,7 +21,7 @@ jobs:
           import os,pathlib,requests,re
           from issue_terms import fetch_xml
           out=pathlib.Path('diagnostic-originals');out.mkdir()
-          for rn in ['20260916000188','20260916000191']:
+          for rn in ['20260916800188','20260916800191']:
               try:raw=fetch_xml(os.environ['DART_API_KEY'],rn)
               except Exception as exc:raw=type(exc).__name__
               (out/(rn+'.xml')).write_text(raw,encoding='utf-8')

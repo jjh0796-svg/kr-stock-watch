@@ -5,7 +5,7 @@ from dart_watch import STATE_FILE,edit_existing_disclosure,_summary_ready,_compl
 from summarize import summarize
 
 state=load_state(STATE_FILE,{})
-for rn,corp,code in [('20260916000188','애경케미칼','161000'),('20260916000191','AK홀딩스','006840')]:
+for rn,corp,code in [('20260916800188','애경케미칼','161000'),('20260916800191','AK홀딩스','006840')]:
     info=state.get('pending_sum',{}).get(rn) or state.get('unresolved_summaries',{}).get(rn) or {}
     item={'rcept_no':rn,'corp_name':corp,'stock_code':code,'corp_code':info.get('corp_code',''),
           'rcept_dt':'20260916','report_nm':info.get('title','[기재정정]유상증자결정(종속회사의주요경영사항)')}
