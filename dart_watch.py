@@ -629,6 +629,8 @@ def _summary_ready(item,summary):
 
 
 def _complete_card(item,base,summary):
+    from disclosure_layout import space_summary
+    summary=space_summary(item.get('report_nm',''),summary)
     head,_,link=base.rpartition('\n')
     snap=stock_snapshot(item.get('stock_code','')) if item.get('stock_code') else None
     body=head.rstrip()+'\n\n'+summary.strip()
