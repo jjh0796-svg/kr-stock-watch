@@ -128,9 +128,9 @@ def refresh(state,scope,key,send,save,*,today=None,fetch=fetch_company,family_lo
             if key_notice in e['notices']:continue
             if sent>=5:return
             if mode=='upcoming':
-                text=f'📅 [{e["corp"]} · 다가오는 일정]\n{LABELS[kind]}: {raw}\n공시상 예정일이며 실제 완료를 뜻하지 않습니다.'
+                text=f'📅 [{e["corp"]} · 다가오는 일정]\n{LABELS[kind]}: {raw}'
             else:
-                text=f'🔎 [{e["corp"]} · 납입 결과 확인 필요]\n공시상 납입 예정일: {raw}\n{stamp} 조회한 DART 공시 중 이 건에 명시적으로 연결되는 결과 공시를 확인하지 못했습니다.\n미납·실패로 판정한 것은 아닙니다.'
+                text=f'🔎 [{e["corp"]} · 납입 결과 확인 필요]\n공시상 납입 예정일: {raw}\n{stamp} 조회한 DART 공시 중 이 건에 명시적으로 연결되는 결과 공시를 확인하지 못했습니다.'
             text+='\n'+URL+e['latest']
             if send({'rcept_no':e['latest']},text):
                 e['notices'][key_notice]=stamp;sent+=1;save(state)

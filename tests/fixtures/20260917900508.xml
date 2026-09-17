@@ -1,0 +1,171 @@
+<html>
+ <head> 
+  <meta content="gdi" http-equiv="X-UA-TextLayoutMetrics"> 
+  <meta content="text/html; charset=euc-kr" http-equiv="Content-Type"> 
+  <STYLE>
+.xforms * { font-family: 돋움체;}
+.xforms_title * { font-size: 13pt; padding : 0 0 10 0;}
+
+.xforms table {
+    font-size: 10px;
+    padding:0px;
+    border-collapse:collapse;
+    color: #3D3D3D;
+}
+.xforms td {
+    padding-left:0px;
+    padding-top:0px;
+    border-collapse:collapse;
+    line-height:22px;
+    color: #3D3D3D;
+    /*text-align:right;*/
+    vertical-align:middle;
+    border: 1px solid #7f7f7f;
+}
+
+.xforms span {
+    /*display: inline-block;*/
+    padding-left:3px;
+    padding-right: 1px;
+    line-height:22px;
+    padding-top:0px;
+    padding-bottom:0px;
+    text-align:left;
+    vertical-align:middle;
+    border: 0px solid #DBDBDB;
+}
+
+.xforms.img{
+    border : 0px;
+}
+
+.xforms a:link {
+
+    color: #194866;
+    text-decoration: none;
+}
+.xforms a:active {
+
+    color: #194866;
+    text-decoration: none;
+}
+.xforms a:visited {
+    color: #194866;
+    text-decoration: none;
+}
+
+.xforms A:hover {
+    color:008BE3;
+    text-decoration: none;
+}
+
+.xforms_input{
+    border: 0px solid #DBDBDB;
+    padding-left:3px;
+    padding-right: 1px;
+    height:22px;
+    padding-top:0px;
+    padding-bottom:0px;
+    text-align:left;
+}
+</STYLE> 
+  <title>에이팩트/전환청구권행사/(2026.09.17)전환청구권행사</title> 
+ </head> 
+ <body> 
+  <div class="xforms"> 
+   <div> 
+    <span class="noprint" style="display:none;width:600px;font-size:10pt;"> </span> 
+    <div class="xforms_title"> 
+     <div> 
+      <span style="width:598px;font-weight:bold;text-align:center;">전환청구권 행사</span> 
+     </div> 
+    </div> 
+    <span class="noprint" style="display:none;width:600px;font-size:10pt;"> </span> 
+    <table border="1" bordercolordark="white" bordercolorlight="#666666" cellpadding="1" cellspacing="0" id="XFormD27_Form0_Table0" style="margin:0px 0px 20px 0px;width:597px;font-size:10pt;border:1px solid #7f7f7f;"> 
+     <tbody> 
+      <tr> 
+       <td width="246"> <span style="width:246px;font-size:10pt;">1. 전환청구권 행사주식수 누계 (주) (기 신고된 주식수량 제외)</span> </td> 
+       <td colspan="2" width="351"> <span class="xforms_input" style="width:351px;font-size:10pt;text-align:right;">505,809</span> </td> 
+      </tr> 
+      <tr> 
+       <td width="246"> <span style="width:246px;font-size:10pt;">-발행주식총수(주)</span> </td> 
+       <td colspan="2" width="351"> <span class="xforms_input" style="width:351px;font-size:10pt;text-align:right;">43,823,556</span> </td> 
+      </tr> 
+      <tr> 
+       <td width="246"> <span style="width:246px;font-size:10pt;">-발행주식총수 대비(%)</span> </td> 
+       <td colspan="2" width="351"> <span class="xforms_input" style="width:351px;font-size:10pt;text-align:right;">1.15</span> </td> 
+      </tr> 
+      <tr> 
+       <td width="246"> <span style="width:246px;font-size:10pt;">2. 공정거래위원회 신고대상 여부</span> </td> 
+       <td colspan="2" width="351"> <span class="xforms_input" style="width:351px;font-size:10pt;">미해당</span> </td> 
+      </tr> 
+      <tr> 
+       <td rowspan="2" width="246"> <span style="width:246px;font-size:10pt;">3. 기타 투자판단에 참고할 사항</span> </td> 
+       <td colspan="2" width="351"> <span class="xforms_input" style="width:351px;font-size:10pt;">- 상기 '발행주식총수'는 기 전환청구권 행사로 증가된 주식수가 포함되었고, 본 전환청구권 행사로 증가될 주식수 505,809주가 포함되지 않은 주식수입니다. <br xmlns:java="http://xml.apache.org/xalan/java"> <br xmlns:java="http://xml.apache.org/xalan/java">- 하기 '일별 전환청구내역'의 '상장일 또는 예정일'은 관계기관 일정에 따라 변경될 수 있습니다. <br xmlns:java="http://xml.apache.org/xalan/java"> <br xmlns:java="http://xml.apache.org/xalan/java">- 하기 '전환사채 잔액'의 '신고일 현재 미전환사채 잔액' 및 '전환가능 주식수'는 본 전환청구권 행사 주식 발행 후의 전환사채 잔액 및 주식수 입니다.</span> </td> 
+      </tr> 
+      <tr> 
+       <td width="77"> <span style="width:77px;font-size:10pt;">※관련공시</span> </td> 
+       <td width="274"> <span style="width:274px;font-size:10pt;"> <a href="http://kind.krx.co.kr/common/disclsviewer.do?method=search&amp;acptno=20260812000485&amp;rcpno=20260812000485&amp;orgid=K&amp;tran=Y&amp;langTpCd=0" target="_blank" xmlns="http://www.w3.org/1999/xhtml" xmlns:xf="http://www.w3.org/2002/xforms" xmlns:xh="http://www.w3.org/1999/xhtml" xmlns:xsd="http://www.w3.org/2001/XMLSchema">2026-08-12 전환청구권행사</a> <br xmlns:java="http://xml.apache.org/xalan/java"> <a href="http://kind.krx.co.kr/common/disclsviewer.do?method=search&amp;acptno=20260812000482&amp;rcpno=20260812000482&amp;orgid=K&amp;tran=Y&amp;langTpCd=0" target="_blank" xmlns="http://www.w3.org/1999/xhtml" xmlns:xf="http://www.w3.org/2002/xforms" xmlns:xh="http://www.w3.org/1999/xhtml" xmlns:xsd="http://www.w3.org/2001/XMLSchema">2026-08-12 전환청구권행사</a> <br xmlns:java="http://xml.apache.org/xalan/java"> <a href="http://kind.krx.co.kr/common/disclsviewer.do?method=search&amp;acptno=20260724000820&amp;rcpno=20260724000820&amp;orgid=K&amp;tran=Y&amp;langTpCd=0" target="_blank" xmlns="http://www.w3.org/1999/xhtml" xmlns:xf="http://www.w3.org/2002/xforms" xmlns:xh="http://www.w3.org/1999/xhtml" xmlns:xsd="http://www.w3.org/2001/XMLSchema">2026-07-24 전환청구권행사</a> <br xmlns:java="http://xml.apache.org/xalan/java"> <a href="http://kind.krx.co.kr/common/disclsviewer.do?method=search&amp;acptno=20260722000570&amp;rcpno=20260722000570&amp;orgid=K&amp;tran=Y&amp;langTpCd=0" target="_blank" xmlns="http://www.w3.org/1999/xhtml" xmlns:xf="http://www.w3.org/2002/xforms" xmlns:xh="http://www.w3.org/1999/xhtml" xmlns:xsd="http://www.w3.org/2001/XMLSchema">2026-07-22 전환청구권행사</a> <br xmlns:java="http://xml.apache.org/xalan/java"> <a href="http://kind.krx.co.kr/common/disclsviewer.do?method=search&amp;acptno=20250717000389&amp;rcpno=20250717000319&amp;orgid=F&amp;tran=Y&amp;langTpCd=0" target="_blank" xmlns="http://www.w3.org/1999/xhtml" xmlns:xf="http://www.w3.org/2002/xforms" xmlns:xh="http://www.w3.org/1999/xhtml" xmlns:xsd="http://www.w3.org/2001/XMLSchema">2025-07-17 전환사채권발행결정(제3회차)</a> <br xmlns:java="http://xml.apache.org/xalan/java"> </span> </td> 
+      </tr> 
+     </tbody> 
+    </table> 
+    <span style="width:606px;font-size:11pt;font-weight:bold;">일별 전환청구내역</span> 
+    <table border="1" bordercolordark="white" bordercolorlight="#666666" cellpadding="1" cellspacing="0" id="XFormD27_Form0_RepeatTable0" style="margin:0px 0px 20px 0px;width:605px;font-size:10pt;border:1px solid #7f7f7f;"> 
+     <tbody> 
+      <tr> 
+       <td rowspan="2" width="99"> <span style="width:99px;font-size:10pt;text-align:center;">청구일자</span> </td> 
+       <td colspan="2" width="143"> <span style="width:143px;font-size:10pt;text-align:center;">사채의 명칭</span> </td> 
+       <td rowspan="2" width="93"> <span style="width:93px;font-size:10pt;text-align:center;">청구금액</span> </td> 
+       <td rowspan="2" width="103"> <span style="width:103px;font-size:10pt;text-align:center;">전환가액</span> </td> 
+       <td rowspan="2" width="73"> <span style="width:73px;font-size:10pt;text-align:center;">발행한 주식수</span> </td> 
+       <td rowspan="2" width="94"> <span style="width:94px;font-size:10pt;text-align:center;">상장일 또는 예정일</span> </td> 
+      </tr> 
+      <tr> 
+       <td width="44"> <span style="width:44px;font-size:10pt;text-align:center;">회차</span> </td> 
+       <td width="99"> <span style="width:99px;font-size:10pt;text-align:center;">종류</span> </td> 
+      </tr> 
+      <tr> 
+       <td width="99"> <span class="xforms_input" style="width:99px;font-size:10pt;">2026-09-10</span> </td> 
+       <td width="44"> <span class="xforms_input" style="width:44px;font-size:10pt;text-align:center;">3</span> </td> 
+       <td width="99"> <span class="xforms_input" style="width:99px;font-size:10pt;">무기명식무보증사모전환사채</span> </td> 
+       <td width="93"> <span class="xforms_input" style="width:93px;font-size:10pt;text-align:right;">300,000,000원</span> </td> 
+       <td width="103"> <span class="xforms_input" style="width:103px;font-size:10pt;text-align:right;">2,323</span> </td> 
+       <td width="73"> <span class="xforms_input" style="width:73px;font-size:10pt;text-align:right;">129,143</span> </td> 
+       <td width="94"> <span class="xforms_input" style="width:94px;font-size:10pt;">2026-10-23</span> </td> 
+      </tr> 
+      <tr> 
+       <td width="99"> <span class="xforms_input" style="width:99px;font-size:10pt;">2026-09-17</span> </td> 
+       <td width="44"> <span class="xforms_input" style="width:44px;font-size:10pt;text-align:center;">3</span> </td> 
+       <td width="99"> <span class="xforms_input" style="width:99px;font-size:10pt;">무기명식무보증사모전환사채</span> </td> 
+       <td width="93"> <span class="xforms_input" style="width:93px;font-size:10pt;text-align:right;">875,000,000원</span> </td> 
+       <td width="103"> <span class="xforms_input" style="width:103px;font-size:10pt;text-align:right;">2,323</span> </td> 
+       <td width="73"> <span class="xforms_input" style="width:73px;font-size:10pt;text-align:right;">376,666</span> </td> 
+       <td width="94"> <span class="xforms_input" style="width:94px;font-size:10pt;">2026-10-23</span> </td> 
+      </tr> 
+     </tbody> 
+    </table> 
+    <span style="width:611px;font-size:11pt;font-weight:bold;">전환사채 잔액</span> 
+    <table border="1" bordercolordark="white" bordercolorlight="#666666" cellpadding="1" cellspacing="0" id="XFormD27_Form0_RepeatTable1" style="margin:0px 0px 20px 0px;width:602px;border:1px solid #7f7f7f;"> 
+     <tbody> 
+      <tr> 
+       <td width="61"> <span style="width:61px;font-size:10pt;text-align:center;">회차</span> </td> 
+       <td colspan="2" width="171"> <span style="width:171px;font-size:10pt;text-align:center;">발행당시 사채의 권면(전자등록)총액(통화단위)</span> </td> 
+       <td colspan="2" width="166"> <span style="width:166px;font-size:10pt;text-align:center;">신고일 현재 미전환사채 잔액 (통화단위)</span> </td> 
+       <td width="104"> <span style="width:104px;font-size:10pt;text-align:center;">전환가액(원)</span> </td> 
+       <td width="100"> <span style="width:100px;font-size:10pt;text-align:center;">전환가능 주식수</span> </td> 
+      </tr> 
+      <tr> 
+       <td width="61"> <span class="xforms_input" style="width:61px;font-size:10pt;text-align:center;">3</span> </td> 
+       <td width="81"> <span class="xforms_input" style="width:81px;font-size:10pt;text-align:right;">10,100,000,000</span> </td> 
+       <td width="90"> <span class="xforms_input" style="width:90px;font-size:10pt;">KRW : South-Korean Won</span> </td> 
+       <td width="86"> <span class="xforms_input" style="width:86px;font-size:10pt;text-align:right;">5,530,000,000</span> </td> 
+       <td width="80"> <span class="xforms_input" style="width:80px;font-size:10pt;">KRW : South-Korean Won</span> </td> 
+       <td width="104"> <span class="xforms_input" style="width:104px;font-size:10pt;text-align:right;">2,323</span> </td> 
+       <td width="100"> <span class="xforms_input" style="width:100px;font-size:10pt;text-align:right;">2,380,542</span> </td> 
+      </tr> 
+     </tbody> 
+    </table> 
+   </div> 
+  </div>  
+ </body>
+</html>

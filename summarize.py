@@ -10,7 +10,7 @@ import io
 import os
 import re
 import zipfile
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import requests
 
@@ -684,28 +684,59 @@ def _sum_asset(api_key: str, rcept_no: str, ctx: dict | None = None) -> str | No
     return "\n".join(lines) if lines else None
 
 
+def latest_close(code, now=None):
+    """Use dated completed sessions only; today's chart row may be an intraday price."""
+    now=now or datetime.now(timezone(timedelta(hours=9)))
+    try:
+        basic=requests.get(f'https://m.stock.naver.com/api/stock/{code}/basic',headers=UA_HEADERS,timeout=10).json()
+        rows=requests.get(f'https://m.stock.naver.com/api/stock/{code}/price',headers=UA_HEADERS,timeout=10).json()
+        today=now.date().isoformat()
+        traded=str(basic.get('localTradedAt',''))
+        finished=(basic.get('marketStatus')=='CLOSE' and traded[:10]==today
+                  and now.hour*60+now.minute>=15*60+30 and traded[11:16]>='15:30')
+        for row in sorted(rows,key=lambda r:r.get('localTradedAt',''),reverse=True):
+            date=str(row.get('localTradedAt',''))[:10]
+            price=_num(row.get('closePrice'))
+            if price and re.fullmatch(r'20\d{2}-\d{2}-\d{2}',date) and (date<today or (date==today and finished)):
+                return f'최근 종가: {price:,.0f}원 ({date})'
+    except Exception:
+        pass
+    return None
+
+
 def _sum_exercise(api_key: str, rcept_no: str, ctx: dict | None = None) -> str | None:
-    """전환청구권·신주인수권·교환청구권 행사 — 행사주식수·총수대비·잔여 물량"""
-    text = _doc_text(api_key, rcept_no)
-    shares = _num((re.search(r"행사주식수\s*누계\s*\(주\)[^\d]*([\d,]+)", text) or [None, None])[1])
-    pct = _num((re.search(r"발행주식총수\s*대비\s*\(%\)\s*([\d.,]+)", text) or [None, None])[1])
-    lines = []
-    if shares:
-        line = f"행사: {shares:,.0f}주"
-        if pct is not None:
-            line += f" (발행주식총수 대비 {pct:.2f}%)"
-        lines.append(line)
-    row = re.search(r"(\d{4}-\d{2}-\d{2})\s+\d{1,3}\s+\S.{0,60}?([\d,]{6,})\s*원\s+([\d,]+)\s+([\d,]+)\s+(\d{4}-\d{2}-\d{2})", text)
-    if row:
-        prc = _num(row.group(3))
-        if prc:
-            lines.append(f"전환/행사가 {prc:,.0f}원 · 상장예정 {row.group(5)}")
-    rem = re.search(r"잔액.{0,200}?([\d,]{7,})\s*KRW[^0-9]*([\d,]{7,})\s*KRW[^0-9]*([\d,]+)\s+([\d,]+)", text)
+    from issue_terms import fetch_xml,TableRows
+    raw=fetch_xml(api_key,rcept_no)
+    text=re.sub(r'\s+',' ',re.sub(r'<[^>]+>',' ',raw))
+    shares=_num((re.search(r'행사주식수\s*누계\s*\(주\)[^\d]*([\d,]+)',text) or [None,None])[1])
+    pct=_num((re.search(r'발행주식총수\s*대비\s*\(%\)\s*([\d.,]+)',text) or [None,None])[1])
+    if shares is None:return None
+    lines=[f'행사: {shares:,.0f}주'+(f' (발행주식총수 대비 {pct:.2f}%)' if pct is not None else '')]
+    parser=TableRows();parser.feed(raw)
+    active=False;entries=[]
+    for row in parser.rows:
+        if row[0]=='청구일자' and any('가액' in x for x in row):active=True;continue
+        if active and row[0]=='회차' and len(row)>2:active=False
+        if active and len(row)==7 and re.fullmatch(r'20\d{2}-\d{2}-\d{2}',row[0]):
+            price=_num(row[4]);qty=_num(row[5])
+            if price and qty:entries.append((row[0],row[1],price,qty,row[6]))
+    title=(ctx or {}).get('title','')
+    label='교환청구 단가' if '교환' in title else '행사 단가' if '신주인수권' in title else '전환청구 단가'
+    prices=list(dict.fromkeys((e[1],e[2]) for e in entries))
+    if len({price for _,price in prices})==1:
+        lines.append(f'{label}: {prices[0][1]:,.0f}원')
+    else:
+        lines.extend(f'{label}: {price:,.0f}원 ({seq}회차)' for seq,price in prices)
+    code=(ctx or {}).get('code')
+    if code:lines.append(latest_close(code) or '최근 종가: 조회 불가')
+    if entries:
+        lines.append('')
+        lines.extend(f'청구 {date} · {seq}회차 · {qty:,.0f}주 · 상장예정 {listing}' for date,seq,price,qty,listing in entries)
+    rem=re.search(r'잔액.{0,200}?([\d,]{7,})\s*KRW[^0-9]*([\d,]{7,})\s*KRW[^0-9]*([\d,]+)\s+([\d,]+)',text)
     if rem:
-        remaining, convertible = _num(rem.group(2)), _num(rem.group(4))
-        if remaining and convertible:
-            lines.append(f"미전환 잔액 {_eok(remaining)} → 추가 전환가능 {convertible:,.0f}주")
-    return "\n".join(lines) if lines else None
+        remaining,convertible=_num(rem.group(2)),_num(rem.group(4))
+        if remaining and convertible:lines.append(f'미전환 잔액 {_eok(remaining)} → 추가 전환가능 {convertible:,.0f}주')
+    return '\n'.join(lines)
 
 
 def _sum_rights_doc(api_key: str, rcept_no: str, code: str) -> str | None:
@@ -926,7 +957,7 @@ def summarize(item: dict, api_key: str) -> str | None:
         kind = doc_kind(title)
         if kind:
             fn = DOC_SUMMARIZERS[kind][0]
-            result = fn(api_key, rcept_no, {"code": code, "corp_code": corp_code})
+            result = fn(api_key, rcept_no, {"code": code, "corp_code": corp_code, "title": title})
         # 주요사항보고서 계열 — 구조화 API
         elif corp_code and rcept_dt:
             cb_kinds = {"cvbdIsDecsn": "CB", "bdwtIsDecsn": "BW", "exbdIsDecsn": "EB"}

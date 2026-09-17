@@ -10,8 +10,32 @@ ROWS=[
  ('20260916000208','링크솔루션','474650','[기재정정]주요사항보고서(전환사채권발행결정)',['30.0% 할증','아트만자산운용 70.0억원','HNB 코스닥벤처']),
 ]
 
+def repair_reminder(state):
+    import hashlib,requests
+    from followup_watch import scope_for,LABELS,URL
+    token=os.environ['TELEGRAM_BOT_TOKEN'];chat=os.environ['TELEGRAM_CHAT_ID']
+    scope=scope_for(token,chat)
+    book=state.get('filing_replies',{}).get(scope,{})
+    edited=0
+    for event in state.get('followup_events',{}).get(scope,{}).values():
+        if event.get('latest')!='20260917000124':continue
+        for kind,raw in event.get('dates',{}).items():
+            if not raw:continue
+            old=f'📅 [{event["corp"]} · 다가오는 일정]\n{LABELS[kind]}: {raw}\n공시상 예정일이며 실제 완료를 뜻하지 않습니다.'+'\n'+URL+event['latest']
+            digest=hashlib.sha256((event['latest']+'|'+old).encode()).hexdigest()+':0'
+            mid=book.get('deliveries',{}).get(digest)
+            if type(mid) is not int:continue
+            new=f'📅 [{event["corp"]} · 다가오는 일정]\n\n{LABELS[kind]}: {raw}\n\n'+URL+event['latest']
+            result=requests.post(f'https://api.telegram.org/bot{token}/editMessageText',json={'chat_id':chat,'message_id':mid,'text':new,'disable_web_page_preview':True},timeout=25).json()
+            assert result.get('ok') or 'message is not modified' in result.get('description',''), 'Reminder edit failed'
+            print('REMINDER_EDITED',mid);edited+=1
+    assert edited, 'Original reminder not present in completed state cache'
+
+
 def main():
     state=load_state(STATE_FILE,{})
+    if os.environ.get('FORMAT_TARGET')=='reminder':
+        repair_reminder(state);return
     rows=ROWS
     if os.environ.get('FORMAT_TARGET')=='kcc':
         rows=[('20260916900511','KCC건설','021320','[기재정정]단일판매ㆍ공급계약체결(자율공시)',['27.6억원','매출대비 0.4%','7,415일'])]

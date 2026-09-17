@@ -21,7 +21,7 @@ def test_reminder_then_unconfirmed_only_once_each_after_successful_scan():
         refresh(state,'scope','key',send,lambda s:None,today=today,fetch=fetch)
     assert send.call_count==2
     assert '다가오는 일정' in send.call_args_list[0].args[1]
-    assert '미납·실패로 판정한 것은 아닙니다' in send.call_args_list[1].args[1]
+    assert '결과 공시를 확인하지 못했습니다' in send.call_args_list[1].args[1]
 
 def test_failed_scan_and_other_chat_never_claim_no_result():
     state=seed();send=Mock()
