@@ -10,6 +10,9 @@
   T3 52주 신고가/신저가 터치 (워치리스트만)
 - 노이즈 억제: 종목·트리거당 1일 1회, T1 재알림은 직전 알림가 대비 추가 ±3%시.
   장 시작 직후(09:00~09:05) 제외, 폴링 매분 09:05~15:30.
+- 실전성 개편(2026-09-18): ①시장 스캔분은 시총 2,000억↑·거래대금(경과시간 비례 100억) 통과만
+  (⭐💼 면제) ②내 종목은 즉시, 시장분은 5분 묶음 ③T1 재알림 하루 상한(시장 2·내 종목 4),
+  급변+상위진입 한 줄 통합 ④당일 종목뉴스 '왜' 한 줄 ⑤같은 업종 동반 신호는 🧩 테마 줄.
 
 사용 (오라클 서버 cron):
   python spike_watch.py --prep   # 평일 08:40 — pykrx로 20일 평균 거래량·52주 고저 캐시
@@ -39,6 +42,13 @@ CHG_ENTRY = 7.0       # T1b: 등락 상위 최초 진입 알림 임계 (%)
 VOL_MULT = 3.0        # T2: 20일 평균 거래량 대비 배수
 RANK_N = 20           # 등락 상위/하위 각 종목 수
 AMOUNT_N = 20         # 거래대금 상위 스캔 종목 수 (시장별) — 2026-09-01 추가
+
+# 실전성 개편 (2026-09-18): 시장 스캔분은 매매 가능한 종목만, 5분 묶음으로
+MIN_MKTCAP = 2e11         # 시장 스캔분 시총 하한 2,000억 (⭐관심·💼보유는 면제)
+MIN_VALUE_FULLDAY = 1e10  # 거래대금 하한 — 종일 기준 100억, 장중엔 경과시간 비례(최소 20%)
+T1_MAX_MARKET = 2         # 시장 종목의 5분 급변 알림 하루 최대 횟수
+T1_MAX_MINE = 4           # 내 종목은 좀 더 허용
+DIGEST_MIN = 5            # 시장 신호 묶음 발송 주기(분) — 내 종목 신호는 즉시
 
 
 # ------------------------------------------------------------------ 환경/상태
@@ -160,9 +170,15 @@ def fetch_quotes(codes):
                 price = float(str(d.get("closePrice", "0")).replace(",", "") or 0)
                 rate = float(str(d.get("fluctuationsRatio", "0")).replace(",", "") or 0)
                 vol = float(str(d.get("accumulatedTradingVolume", "0")).replace(",", "") or 0)
+                try:
+                    value = float(d.get("accumulatedTradingValueRaw") or 0)   # 당일 누적 거래대금(원)
+                    mcap = float(d.get("marketValueFullRaw") or 0)            # 시가총액(원)
+                except (TypeError, ValueError):
+                    value, mcap = 0.0, 0.0
                 if code and price > 0:
                     out[code] = {"name": d.get("stockName", code),
-                                 "price": price, "rate": rate, "volume": vol}
+                                 "price": price, "rate": rate, "volume": vol,
+                                 "value": value, "mcap": mcap}
         except Exception as e:
             print(f"[warn] quotes: {e}")
     return out
@@ -219,6 +235,109 @@ def naver_avg20(code):
 # 거래대금 상위엔 ETF·ETN·선물형이 섞인다 — 개별 종목 신호가 아니므로 제외
 ETF_KEYWORDS = ("KODEX", "TIGER", "RISE", "ACE ", "SOL ", "PLUS ", "HANARO",
                 "KIWOOM ", "KoAct", "ARIRANG", "ETN", "레버리지", "인버스", "선물")
+
+
+# ------------------------------------------------------------------ 실전성 필터·맥락 (2026-09-18)
+
+def liquid_ok(q, now):
+    """시장 스캔 종목의 유동성 관문 — 시총 2,000억↑ + 거래대금(경과시간 비례) 통과만.
+    등락률 랭킹은 동전주·소형 테마주가 점령하므로 매매 가능한 종목만 남긴다."""
+    if q.get("mcap", 0) < MIN_MKTCAP:
+        return False
+    elapsed = (now.hour * 60 + now.minute) - 9 * 60
+    frac = max(0.2, min(1.0, elapsed / 390.0))   # 09:00~15:30 = 390분
+    return q.get("value", 0) >= MIN_VALUE_FULLDAY * frac
+
+
+def why_line(code, name=""):
+    """신호 종목의 '왜' — 오늘자 종목뉴스 중 종목명이 들어간 기사를 우선, 없으면
+    시황성 기사(코스피·증시·마감 등 종목 무관)를 뺀 첫 기사. 마땅치 않으면 ''."""
+    import html as _html
+    import re as _re
+    try:
+        r = requests.get(f"https://m.stock.naver.com/api/news/stock/{code}",
+                         params={"pageSize": 5, "page": 1}, headers=UA, timeout=6)
+        titles = []
+        for group in r.json() or []:
+            for item in group.get("items", []):
+                if str(item.get("datetime", ""))[:8] == today_str():
+                    titles.append(_html.unescape(str(item.get("title", ""))).strip())
+        if not titles:
+            return ""
+        macro = _re.compile(r"코스피|코스닥|증시|마감|시황|인사이트|특징주 모음|오늘의")
+        pick = next((t for t in titles if name and name in t), None)
+        if pick is None:
+            pick = next((t for t in titles if not macro.search(t)), None)
+        if not pick:
+            return ""
+        if len(pick) > 46:
+            pick = pick[:46] + "…"
+        return f"   └ 📰 {pick}"
+    except Exception:
+        return ""
+
+
+def industry_of(code, cache):
+    """종목의 네이버 업종 번호 (integration API, 파일 캐시 — 업종은 거의 안 바뀐다)."""
+    if code in cache:
+        return cache[code]
+    no = None
+    try:
+        r = requests.get(f"https://m.stock.naver.com/api/stock/{code}/integration",
+                         headers=UA, timeout=6)
+        no = r.json().get("industryCode")
+    except Exception:
+        pass
+    cache[code] = no
+    return no
+
+
+def industry_names():
+    """업종 번호→이름 (하루 1회 캐시)."""
+    path = STATE_DIR / f"industry_names_{today_str()}.json"
+    names = load_json(path, {})
+    if names:
+        return names
+    try:
+        for page in (1, 2):   # 업종은 80여 개 — 페이지 크기 상한(100) 안에서 두 번이면 충분
+            r = requests.get("https://m.stock.naver.com/api/stocks/industry",
+                             params={"page": page, "pageSize": 100}, headers=UA, timeout=10)
+            groups = r.json().get("groups", [])
+            for g in groups:
+                names[str(g.get("no"))] = g.get("name", "")
+            if len(groups) < 100:
+                break
+        if names:
+            save_json(path, names)
+    except Exception:
+        pass
+    return names
+
+
+def theme_lines(signals):
+    """같은 묶음 안에서 같은 업종·같은 방향 신호가 2건 이상이면 테마 동반 줄을 만든다."""
+    cache_path = STATE_DIR / "industry_cache.json"
+    cache = load_json(cache_path, {})
+    before = len(cache)
+    groups = {}
+    for s in signals:
+        if s["dir"] not in ("up", "down"):
+            continue
+        no = industry_of(s["code"], cache)
+        if no:
+            groups.setdefault((str(no), s["dir"]), []).append(s["name"])
+    if len(cache) != before:
+        save_json(cache_path, cache)
+    names = industry_names() if groups else {}
+    out = []
+    for (no, direction), members in sorted(groups.items(), key=lambda kv: -len(kv[1])):
+        uniq = list(dict.fromkeys(members))
+        if len(uniq) < 2:
+            continue
+        label = names.get(no) or f"업종{no}"
+        word = "동반 급등" if direction == "up" else "동반 급락"
+        out.append(f"🧩 {label} {len(uniq)}종 {word}: " + "·".join(uniq[:5]))
+    return out
 
 
 # ------------------------------------------------------------------ tick
@@ -303,8 +422,8 @@ def tick():
     universe = set(wl) | set(ranked) | amount_set
     quotes = fetch_quotes(universe)
 
-    ups, downs, others = [], [], []   # (정렬키, 줄) — 🔴급등/🔵급락/📢거래량·52주
-    sigs = []                          # (code, name, dir, note) — 성과 채점용
+    # 신호: {code, name, sec(up|down|other 섹션), dir(성과 채점용), key(정렬), line, mine, note}
+    signals = []
     # 09:00~09:04 침묵 창 — 트리거 평가 없이 이력만 적재해야 sent 오염(미발송 신호가
     # 중복방지에 기록돼 09:05 이후 영영 침묵)이 없다
     silent = not alerts_allowed(now)
@@ -314,7 +433,8 @@ def tick():
 
     for code, q in quotes.items():
         name, price, rate = q["name"], q["price"], q["rate"]
-        tag = "💼" if code in hd else ("⭐" if code in wl else "·")
+        mine = code in wl
+        tag = "💼" if code in hd else ("⭐" if mine else "·")
 
         # 이력 적재 (최근 10분)
         h = hist.setdefault(code, [])
@@ -324,35 +444,47 @@ def tick():
         if silent:
             continue
 
+        # 시장 스캔분은 유동성 관문(시총·거래대금) 통과 + 개별 종목만 — 내 종목은 면제
+        if not mine and (not liquid_ok(q, now) or any(k in name for k in ETF_KEYWORDS)):
+            continue
+
         s = sent.get(code, {})
 
-        # T1: 5분 급변 — 방향은 5분 변동 기준
-        if len(h) >= 6:
-            base = h[-6][1]
-            if base > 0:
-                chg5 = (price / base - 1) * 100
-                last_alert_price = s.get("t1")
-                need = (last_alert_price is None or
-                        abs(price / last_alert_price - 1) * 100 >= CHG_5MIN)
-                if abs(chg5) >= CHG_5MIN and need:
-                    # 섹션은 "5분 변동" 기준 — 당일과 방향이 다르면 반전 표시
-                    flip = ""
-                    if chg5 > 0 > rate:
-                        flip = " ↗반등중"
-                    elif chg5 < 0 < rate:
-                        flip = " ↘반락중"
-                    line = (f"{tag} {name} 5분 {chg5:+.1f}% · "
-                            f"당일 {rate:+.1f}%{flip} · {price:,.0f}원")
-                    (ups if chg5 > 0 else downs).append((abs(chg5), line))
-                    sigs.append((code, name, "up" if chg5 > 0 else "down", f"5분 {chg5:+.1f}%"))
-                    mark(code, "t1", price)
-
-        # T1b: 등락 상위 최초 진입 (±7% 이상) — 방향은 당일 등락 기준
-        if code in ranked and abs(rate) >= CHG_ENTRY and not s.get("entry"):
-            line = f"{tag} {name} 당일 {rate:+.1f}% 상위진입 · {price:,.0f}원"
-            (ups if rate > 0 else downs).append((abs(rate), line))
-            sigs.append((code, name, "up" if rate > 0 else "down", f"상위진입 {rate:+.1f}%"))
-            mark(code, "entry")
+        # T1(5분 급변) + T1b(등락 상위 최초 진입) — 같은 틱에 겹치면 한 줄로 통합
+        t1_hit, chg5 = False, 0.0
+        if len(h) >= 6 and h[-6][1] > 0:
+            chg5 = (price / h[-6][1] - 1) * 100
+            last_alert_price = s.get("t1")
+            count = int(s.get("t1n", 0) or 0)
+            cap = T1_MAX_MINE if mine else T1_MAX_MARKET   # 하루 재알림 상한
+            need = (last_alert_price is None or
+                    abs(price / last_alert_price - 1) * 100 >= CHG_5MIN)
+            t1_hit = abs(chg5) >= CHG_5MIN and need and count < cap
+        entry_hit = code in ranked and abs(rate) >= CHG_ENTRY and not s.get("entry")
+        if t1_hit or entry_hit:
+            parts, flip = [], ""
+            if t1_hit:
+                # 섹션은 "5분 변동" 기준 — 당일과 방향이 다르면 반전 표시
+                if chg5 > 0 > rate:
+                    flip = " ↗반등중"
+                elif chg5 < 0 < rate:
+                    flip = " ↘반락중"
+                parts.append(f"5분 {chg5:+.1f}%")
+            parts.append(f"당일 {rate:+.1f}%{flip}")
+            if entry_hit:
+                parts.append("상위진입")
+            direction = ("up" if chg5 > 0 else "down") if t1_hit else ("up" if rate > 0 else "down")
+            signals.append({
+                "code": code, "name": name, "sec": direction, "dir": direction,
+                "key": abs(chg5) if t1_hit else abs(rate), "mine": mine,
+                "line": f"{tag} {name} " + " · ".join(parts) + f" · {price:,.0f}원",
+                "note": " / ".join(parts),
+            })
+            if t1_hit:
+                mark(code, "t1", price)
+                mark(code, "t1n", int(s.get("t1n", 0) or 0) + 1)
+            if entry_hit:
+                mark(code, "entry")
 
         # T2b: 거래대금 상위 종목의 거래량 폭발 — 당일 누적이 20일 평균의 3배 이상
         mv = mvol.get(code, {}).get("avg", 0)
@@ -361,55 +493,98 @@ def tick():
                 and not s.get("t2m")):
             mult = q["volume"] / mv
             dot = "🔴" if rate > 0 else ("🔵" if rate < 0 else "⚪")
-            others.append((mult, f"{tag} {name} 거래대금상위 · 거래량 x{mult:.1f} {dot}{rate:+.1f}% · {price:,.0f}원"))
-            sigs.append((code, name, "up" if rate >= 0 else "down", f"거래량 x{mult:.1f}"))
+            signals.append({
+                "code": code, "name": name, "sec": "other",
+                "dir": "up" if rate >= 0 else "down", "key": mult, "mine": mine,
+                "line": f"{tag} {name} 거래대금상위 · 거래량 x{mult:.1f} {dot}{rate:+.1f}% · {price:,.0f}원",
+                "note": f"거래량 x{mult:.1f}",
+            })
             mark(code, "t2m")
 
         # 워치리스트 전용 트리거
         p = prep_cache.get(code)
-        if p and code in wl:
+        if p and mine:
             # T2: 거래량 폭증 (당일 등락을 색으로 병기)
             if (p["avg20_vol"] > 0 and q["volume"] >= VOL_MULT * p["avg20_vol"]
                     and not s.get("t2")):
                 mult = q["volume"] / p["avg20_vol"]
                 dot = "🔴" if rate > 0 else ("🔵" if rate < 0 else "⚪")
-                others.append((mult, f"⭐ {name} 거래량 x{mult:.1f} {dot}{rate:+.1f}%"))
+                signals.append({
+                    "code": code, "name": name, "sec": "other",
+                    "dir": "up" if rate >= 0 else "down", "key": mult, "mine": True,
+                    "line": f"⭐ {name} 거래량 x{mult:.1f} {dot}{rate:+.1f}%",
+                    "note": f"거래량 x{mult:.1f}",
+                })
                 mark(code, "t2")
             # T3: 52주 신고/신저
             if price >= p["high52"] and not s.get("t3h"):
-                others.append((999, f"🚀 {name} 52주 신고가 {price:,.0f}원"))
-                sigs.append((code, name, "up", "52주 신고가"))
+                signals.append({"code": code, "name": name, "sec": "other", "dir": "up",
+                                "key": 999, "mine": True,
+                                "line": f"🚀 {name} 52주 신고가 {price:,.0f}원", "note": "52주 신고가"})
                 mark(code, "t3h")
             if price <= p["low52"] and not s.get("t3l"):
-                others.append((999, f"🧊 {name} 52주 신저가 {price:,.0f}원"))
-                sigs.append((code, name, "down", "52주 신저가"))
+                signals.append({"code": code, "name": name, "sec": "other", "dir": "down",
+                                "key": 999, "mine": True,
+                                "line": f"🧊 {name} 52주 신저가 {price:,.0f}원", "note": "52주 신저가"})
                 mark(code, "t3l")
 
     save_json(STATE_DIR / f"intraday_{day}.json", hist)
     save_json(STATE_DIR / f"sent_{day}.json", sent)
 
-    def section(title, items, n):
-        if not items:
-            return []
-        items = sorted(items, key=lambda x: -x[0])
-        lines = ["", title] + [l for _, l in items[:n]]
-        if len(items) > n:
-            lines.append(f"… 외 {len(items)-n}건")
-        return lines
-
     if silent:
         print(f"{ts} 개장 직후 침묵 창 — 이력만 적재")
         return
 
-    total = len(ups) + len(downs) + len(others)
-    if total:
-        send([f"📡 스파이크 {ts}"]
-             + section("🔴 급등 신호 (5분/진입)", ups, 8)
-             + section("🔵 급락 신호 (5분/진입)", downs, 8)
-             + section("📢 거래량·52주 (⭐관심종목)", others, 6))
-        for code, name, direction, note in sigs:
-            log_signal(code, name, direction, note)
-        print(f"{ts} 알림 {total}건")
+    def compose(title, sigs, with_theme):
+        lines = [title]
+        if with_theme:
+            themes = theme_lines(sigs)
+            if themes:
+                lines += [""] + themes
+
+        def section(header, items, n):
+            if not items:
+                return []
+            items = sorted(items, key=lambda x: -x["key"])
+            out = ["", header]
+            for it in items[:n]:
+                out.append(it["line"])
+                why = why_line(it["code"], it["name"])   # 당일 종목뉴스가 있으면 '왜' 한 줄
+                if why:
+                    out.append(why)
+            if len(items) > n:
+                out.append(f"… 외 {len(items) - n}건")
+            return out
+
+        lines += section("🔴 급등 신호 (5분/진입)", [x for x in sigs if x["sec"] == "up"], 8)
+        lines += section("🔵 급락 신호 (5분/진입)", [x for x in sigs if x["sec"] == "down"], 8)
+        lines += section("📢 거래량·52주", [x for x in sigs if x["sec"] == "other"], 6)
+        return lines
+
+    for sig in signals:   # 성과 채점 로그는 감지 시점에 기록
+        log_signal(sig["code"], sig["name"], sig["dir"], sig["note"])
+
+    # 내 종목(⭐관심·💼보유)은 즉시 단독 발송
+    mine_sigs = [x for x in signals if x["mine"]]
+    if mine_sigs:
+        send(compose(f"📡 내 종목 스파이크 {ts}", mine_sigs, with_theme=False))
+
+    # 시장 스캔분은 큐에 모았다가 DIGEST_MIN분 주기로 묶음 발송 (같은 종목은 최신 줄로 통합)
+    pending_path = STATE_DIR / f"pending_{day}.json"
+    pending = load_json(pending_path, [])
+    for sig in (x for x in signals if not x["mine"]):
+        sig["ts"] = ts
+        pending = [p for p in pending if p["code"] != sig["code"]] + [sig]
+    closing = now.time() >= datetime.time(15, 29)
+    if pending and (now.minute % DIGEST_MIN == 0 or closing):
+        first = min(p.get("ts", ts) for p in pending)
+        span = ts if first == ts else f"{first}~{ts}"
+        send(compose(f"📡 시장 스파이크 {span} · 시총 2천억↑·거래대금 필터", pending, with_theme=True))
+        print(f"{ts} 시장 묶음 발송 {len(pending)}건")
+        pending = []
+    save_json(pending_path, pending)
+    if signals:
+        print(f"{ts} 신호 {len(signals)}건 (내 종목 {len(mine_sigs)})")
 
 
 def main():
