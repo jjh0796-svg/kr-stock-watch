@@ -37,17 +37,26 @@ def main():
     if os.environ.get('FORMAT_TARGET')=='reminder':
         repair_reminder(state);return
     rows=ROWS
+    if os.environ.get('FORMAT_TARGET')=='cb_funds':
+        rows=[
+            ('20260921000354','아틀라스링크','297570','주요사항보고서(전환사채권발행결정)',
+             ['한국채권투자운용 90.0억원','55.0억원','35.0억원','배정 합계: 135.0억원']),
+            ('20260921000401','특수건설','026150','주요사항보고서(전환사채권발행결정)',
+             ['라이노스자산운용 45.0억원','에이피캐피탈 (업무집행조합원) 55.0억원','배정 합계: 100.0억원']),
+        ]
     if os.environ.get('FORMAT_TARGET')=='kcc':
         rows=[('20260916900511','KCC건설','021320','[기재정정]단일판매ㆍ공급계약체결(자율공시)',['27.6억원','매출대비 0.4%','7,415일'])]
     for rn,corp,code,title,expected in rows:
         if os.environ.get('FORMAT_REQUIRE_COMPLETED'):
             assert rn not in state.get('pending_sum',{}) and rn not in state.get('unresolved_summaries',{}), 'Message still being processed'
-        item={'rcept_no':rn,'corp_name':corp,'stock_code':code,'corp_code':'','rcept_dt':'20260916','report_nm':title}
+        item={'rcept_no':rn,'corp_name':corp,'stock_code':code,'corp_code':'','rcept_dt':rn[:8],'report_nm':title}
         summary=summarize(item,os.environ['DART_API_KEY'])
         assert _summary_ready(item,summary) and all(v in summary for v in expected), f'Summary validation failed {rn}'
         base=f'🧾 <b>{corp} ({code})</b>\n{title}\nhttps://dart.fss.or.kr/dsaf001/main.do?rcpNo={rn}'
         if os.environ.get('FORMAT_TARGET')=='kcc':
             base=f'🌐📝 <b>[단일판매ㆍ공급계약체결·전체] (코스닥){corp} ({code})</b>\n{title}\nhttps://dart.fss.or.kr/dsaf001/main.do?rcpNo={rn}'
+        if os.environ.get('FORMAT_TARGET')=='cb_funds':
+            base=f'🌐🚨 <b>[전환사채권발행결정·전체] (코스닥){corp} ({code})</b>\n{title}\nhttps://dart.fss.or.kr/dsaf001/main.do?rcpNo={rn}'
         message=_complete_card(item,base,summary)
         assert len(message.encode('utf-16-le'))//2<=3800
         assert edit_existing_disclosure(state,item,message), f'Existing message edit failed {rn}'

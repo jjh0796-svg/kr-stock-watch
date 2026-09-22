@@ -5,7 +5,7 @@ on:
       target:
         description: Existing messages to edit
         type: choice
-        options: [original, kcc, reminder]
+        options: [original, kcc, reminder, cb_funds]
         default: original
 permissions:
   contents: read
