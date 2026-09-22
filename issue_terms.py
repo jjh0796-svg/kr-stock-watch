@@ -96,34 +96,8 @@ def eok_amount(value):
 
 
 def fund_investors(raw,fields,total):
-    rows=TableRows();rows.feed(raw)
-    funds={}
-    for row in rows.rows:
-        match=re.fullmatch(r'본건\s*펀드\s*(\d+)',row[0])
-        if match and len(row)==4:
-            funds[int(match[1])]=(row[1],row[2])
-    names=fields.get('ISSU_NM',[]);amounts=fields.get('ISSU_AMT',[])
-    if not funds or len(names)!=len(amounts):return None
-    groups={};summed=Decimal(0);used=set()
-    for name,amount in zip(names,amounts):
-        m=re.search(r'본건\s*펀드\s*([\d,\s]+)의',name)
-        n=number(amount)
-        if not m or n is None:return None
-        ids=[int(x) for x in re.findall(r'\d+',m[1])]
-        if not ids or any(i not in funds or i in used for i in ids):return None
-        managers={funds[i][1] for i in ids}
-        if len(managers)!=1:return None  # pooled amount cannot be divided by guesswork
-        manager=managers.pop();group=groups.setdefault(manager,{'amount':Decimal(0),'funds':[]})
-        group['amount']+=n;group['funds'].extend(funds[i][0] for i in ids)
-        summed+=n;used.update(ids)
-    if summed!=number(total):return None
-    lines=['<b>투자 펀드 · 운용사별 인수금액</b>']
-    for manager,group in sorted(groups.items(),key=lambda x:-x[1]['amount']):
-        manager=re.sub(r'주식회사\s*|\s*주식회사','',manager).strip()
-        lines.append('• '+html.escape(manager)+' '+eok_amount(group['amount']))
-        lines.extend('  └ '+html.escape(name) for name in group['funds'])
-    lines.append('※ 운용사별 합산액 · 여러 펀드 묶음의 개별 배분액은 추정하지 않음')
-    return lines
+    from cb_investors import format_investors
+    return format_investors(raw,fields,total)
 
 
 def conversion_premium(text):

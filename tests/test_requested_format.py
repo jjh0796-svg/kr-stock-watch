@@ -25,7 +25,7 @@ def test_actual_fund_managers_and_premium():
     assert text.count('  └ ')==28
     assert len(text.encode('utf-16-le'))//2<3000
     fields=Fields();fields.feed(raw)
-    assert fund_investors(raw,fields.fields,'31000000000') is None
+    assert '합계 확인 필요' in '\n'.join(fund_investors(raw,fields.fields,'31000000000'))
 
 
 def test_supply_annualization_actual_contract():
