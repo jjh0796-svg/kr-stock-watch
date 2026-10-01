@@ -398,7 +398,6 @@ def _sum_supply(api_key: str, rcept_no: str, ctx: dict | None = None) -> str | N
         lines.append(" · ".join(s for s in seg if s))
     payment = _clip(re.search(r'대금지급\s*조건\s*등\s*(.+?)\s*7\.', text), 100)
     if payment:lines.append(f"대금지급: {payment}")
-    if 'VAT를 제외' in text or 'VAT 제외' in text:lines.append('금액 기준: 부가세 제외')
     if total is not None:
         if lines:lines.append("")
         line = f"금액: {_eok(total)}"
