@@ -22,6 +22,7 @@
 import argparse
 import datetime
 import json
+import subprocess
 import os
 import sys
 from pathlib import Path
@@ -109,6 +110,24 @@ def read_watchlist():
     return out
 
 
+def read_morning_candidates():
+    """아침 메인 브리핑(Daily-Briefing-Bot)이 넘긴 오늘의 주도주 후보 — handoff/leaders_today.json.
+    날짜가 오늘이 아니면(휴장·미발송) 빈 dict. 내 종목과 같은 트리거 + 🌅 태그 (2026-10-02)."""
+    out = {}
+    path = BASE_DIR / "handoff" / "leaders_today.json"
+    try:
+        if path.exists():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if str(data.get("date", "")).replace("-", "") == today_str():
+                for c in data.get("candidates", []):
+                    code, name = str(c.get("code", "")).strip(), str(c.get("name", "")).strip()
+                    if code and name:
+                        out[code] = name
+    except Exception as e:
+        print(f"[warn] 아침 후보 읽기 실패: {e}")
+    return out
+
+
 def read_holdings():
     """보유 종목 (watch_bot /보유추가 관리, 전 봇 공용 — 2026-08-29).
     스파이크 감시에선 워치리스트와 동일 대우 + 💼 태그."""
@@ -189,7 +208,13 @@ def fetch_quotes(codes):
 def prep():
     """아침: 워치리스트의 20일 평균 거래량·52주 고저를 pykrx로 캐시."""
     from pykrx import stock
-    wl = {**read_watchlist(), **read_holdings()}  # 보유 종목도 트리거 캐시 대상
+    # 아침 브리핑 핸드오프(handoff/)는 GitHub Actions가 이 repo에 커밋한다 → prep 때 받아온다
+    try:
+        subprocess.run(["git", "-C", str(BASE_DIR), "pull", "-q", "--ff-only"], timeout=60,
+                       check=False, capture_output=True)
+    except Exception as e:
+        print(f"[warn] git pull 실패: {e}")
+    wl = {**read_watchlist(), **read_holdings(), **read_morning_candidates()}  # 보유·아침 후보도 트리거 캐시 대상
     end = datetime.date.today().strftime("%Y%m%d")
     start_1y = (datetime.date.today() - datetime.timedelta(days=370)).strftime("%Y%m%d")
     cache = {}
@@ -401,7 +426,8 @@ def tick():
     ts = now.strftime("%H:%M")
 
     hd = read_holdings()
-    wl = {**read_watchlist(), **hd}  # 보유는 워치와 동일 트리거 + 💼 태그
+    mc = read_morning_candidates()
+    wl = {**read_watchlist(), **mc, **hd}  # 보유는 워치와 동일 트리거 + 💼 태그, 아침 후보는 🌅
     ranked = {}   # code -> rate (등락 상위 리스트 출신)
     for market in ("KOSPI", "KOSDAQ"):
         for sort in ("up", "down"):
@@ -434,7 +460,7 @@ def tick():
     for code, q in quotes.items():
         name, price, rate = q["name"], q["price"], q["rate"]
         mine = code in wl
-        tag = "💼" if code in hd else ("⭐" if mine else "·")
+        tag = "💼" if code in hd else ("🌅" if code in mc and code not in read_watchlist() else ("⭐" if mine else "·"))
 
         # 이력 적재 (최근 10분)
         h = hist.setdefault(code, [])
@@ -567,7 +593,8 @@ def tick():
     # 내 종목(⭐관심·💼보유)은 즉시 단독 발송
     mine_sigs = [x for x in signals if x["mine"]]
     if mine_sigs:
-        send(compose(f"📡 내 종목 스파이크 {ts}", mine_sigs, with_theme=False))
+        head = "📡 내 종목·아침 후보 스파이크" if any("🌅" in x["line"] for x in mine_sigs) else "📡 내 종목 스파이크"
+        send(compose(f"{head} {ts}", mine_sigs, with_theme=False))
 
     # 시장 스캔분은 큐에 모았다가 DIGEST_MIN분 주기로 묶음 발송 (같은 종목은 최신 줄로 통합)
     pending_path = STATE_DIR / f"pending_{day}.json"
