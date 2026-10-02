@@ -128,6 +128,182 @@ def read_morning_candidates():
     return out
 
 
+def read_handoff():
+    """아침 브리핑 핸드오프 원본(dict) — 날짜가 오늘이 아니면 {}."""
+    path = BASE_DIR / "handoff" / "leaders_today.json"
+    try:
+        if path.exists():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if str(data.get("date", "")).replace("-", "") == today_str():
+                return data
+    except Exception as e:
+        print(f"[warn] 핸드오프 읽기 실패: {e}")
+    return {}
+
+
+def kospi_now():
+    """코스피 현재가(장중) / 종가(마감 후) — 네이버 폴링 지수 API."""
+    try:
+        r = requests.get("https://polling.finance.naver.com/api/realtime/domestic/index/KOSPI",
+                         headers=UA, timeout=10)
+        d = r.json().get("datas", [])[0]
+        return float(str(d.get("closePrice", "0")).replace(",", "") or 0)
+    except Exception:
+        return 0.0
+
+
+def usdkrw_now():
+    """원/달러 현재가 — 네이버 front-api 환율."""
+    try:
+        r = requests.get("https://m.stock.naver.com/front-api/marketIndex/prices",
+                         params={"category": "exchange", "reutersCode": "FX_USDKRW", "page": 1},
+                         headers={**UA, "Referer": "https://m.stock.naver.com/"}, timeout=10)
+        d = r.json().get("result", [])[0]
+        return float(str(d.get("closePrice", "0")).replace(",", "") or 0)
+    except Exception:
+        return 0.0
+
+
+def industry_changes():
+    """네이버 업종별 등락률 {업종명: %} — 마감 복기에서 오늘볼섹터 🟢/🔴 채점용."""
+    try:
+        r = requests.get("https://m.stock.naver.com/api/stocks/industry",
+                         params={"page": 1, "pageSize": 100},
+                         headers={**UA, "Referer": "https://m.stock.naver.com/"}, timeout=10)
+        return {g.get("name", ""): float(str(g.get("changeRate", "0")).replace(",", "") or 0)
+                for g in r.json().get("groups", [])}
+    except Exception:
+        return {}
+
+
+def level_alerts(handoff, sent, now):
+    """아침 플레이북 레벨(코스피 저항/지지, 환율 경계) 돌파·이탈 — 레벨당 하루 1회 (2026-10-02)."""
+    lv = (handoff.get("levels") or {})
+    kospi = (lv.get("kospi") or {})
+    fx_high = lv.get("fx_high")
+    if not kospi and not fx_high:
+        return
+    lines = []
+    k = kospi_now() if kospi else 0.0
+    if k and kospi.get("high") and k > float(kospi["high"]) and not sent.get("_lv_res"):
+        sent["_lv_res"] = True
+        lines.append(f"📈 코스피 저항 {round(float(kospi['high'])):,}(전일 고가) 돌파 — 현재 {k:,.0f}")
+    low_lv = min(float(kospi.get("low") or 1e9), float(kospi.get("ma5") or 1e9)) if kospi else 0
+    if k and low_lv < 1e8 and k < low_lv and not sent.get("_lv_sup"):
+        sent["_lv_sup"] = True
+        lines.append(f"📉 코스피 지지 {round(low_lv):,}(전일 저가·5일선 중 낮은 값) 이탈 — 현재 {k:,.0f}")
+    if fx_high and not sent.get("_lv_fx"):
+        fx = usdkrw_now()
+        if fx and fx > float(fx_high):
+            sent["_lv_fx"] = True
+            lines.append(f"💱 원/달러 경계 {float(fx_high):,.0f}(전일 고가) 상향 돌파 — 현재 {fx:,.1f}")
+    if lines:
+        send([f"🎯 아침 레벨 알림 {now.strftime('%H:%M')}"] + lines +
+             ["", "아침 브리핑 플레이북 레벨 기준. 추격보다 돌파 후 안착(10분) 확인."])
+
+
+def closing_review(handoff, now):
+    """15:40 마감 복기 — 아침 후보 성과·레벨 결과·섹터 적중을 숫자로. review_YYYYMMDD.json 저장 (2026-10-02)."""
+    day = today_str()
+    path = STATE_DIR / f"review_{day}.json"
+    if path.exists():
+        return
+    review = {"date": day}
+    lines = [f"🧾 마감 복기 {now.strftime('%m/%d')}"]
+    cands = [c for c in handoff.get("candidates", []) if str(c.get("code", "")).strip()]
+    core = set(handoff.get("core") or [])
+    if cands:
+        quotes = fetch_quotes([c["code"] for c in cands])
+        perf = []
+        for c in cands:
+            q = quotes.get(c["code"])
+            if q and q.get("rate") is not None:
+                perf.append((c.get("name", c["code"]), float(q["rate"]), c["code"] in core, c.get("bucket")))
+        if perf:
+            avg = sum(p[1] for p in perf) / len(perf)
+            ups = sum(1 for p in perf if p[1] > 0)
+            best, worst = max(perf, key=lambda x: x[1]), min(perf, key=lambda x: x[1])
+            review["cands"] = {"n": len(perf), "avg": round(avg, 2), "ups": ups,
+                               "core_avg": round(sum(p[1] for p in perf if p[2]) / max(1, sum(1 for p in perf if p[2])), 2) if any(p[2] for p in perf) else None,
+                               "sector_avg": round(sum(p[1] for p in perf if p[3] == "sector") / max(1, sum(1 for p in perf if p[3] == "sector")), 2) if any(p[3] == "sector" for p in perf) else None}
+            lines.append(f"• 아침 후보 {len(perf)}종 평균 {avg:+.1f}% (상승 {ups}/하락 {len(perf) - ups}) · 최고 {best[0]} {best[1]:+.1f}% · 최저 {worst[0]} {worst[1]:+.1f}%")
+            if review["cands"]["core_avg"] is not None:
+                lines.append(f"• 🔥 핵심 후보 평균 {review['cands']['core_avg']:+.1f}%")
+            if review["cands"]["sector_avg"] is not None:
+                lines.append(f"• 섹터 연결 종목 평균 {review['cands']['sector_avg']:+.1f}%")
+    kospi = (handoff.get("levels") or {}).get("kospi") or {}
+    k = kospi_now() if kospi else 0.0
+    if k and kospi.get("close"):
+        pct = (k / float(kospi["close"]) - 1) * 100
+        if k > float(kospi.get("high") or 1e9):
+            verdict, hit = f"저항 {round(float(kospi['high'])):,} 돌파 ✅", "break_up"
+        elif k < float(kospi.get("low") or 0):
+            verdict, hit = f"지지 {round(float(kospi['low'])):,} 이탈 ❌", "break_down"
+        else:
+            verdict, hit = f"박스({round(float(kospi['low'])):,}~{round(float(kospi['high'])):,}) 유지", "box"
+        review["level"] = {"result": hit, "close": k, "pct": round(pct, 2)}
+        lines.append(f"• 코스피 {verdict} — 마감 {k:,.0f} ({pct:+.2f}%)")
+    sectors = handoff.get("sectors") or []
+    if sectors:
+        chg = industry_changes()
+        hits, parts = [], []
+        for sec in sectors:
+            vals = [chg[n] for n in sec.get("industries", []) if n in chg]
+            if not vals:
+                continue
+            avg = sum(vals) / len(vals)
+            stance = sec.get("stance", "")
+            hit = (avg > 0) if stance == "🟢" else (avg < 0) if stance == "🔴" else None
+            hits.append({"name": sec.get("name"), "stance": stance, "avg": round(avg, 2), "hit": hit})
+            parts.append(f"{sec.get('name')}{stance} {avg:+.1f}%{' ✅' if hit else (' ❌' if hit is False else '')}")
+        if parts:
+            review["sectors"] = hits
+            lines.append("• 오늘볼섹터 → 국내 업종: " + " · ".join(parts))
+    if len(lines) == 1:
+        lines.append("• 아침 핸드오프 없음 — 채점할 후보가 없습니다")
+    save_json(path, review)
+    send(lines)
+    if now.weekday() == 4:
+        weekly_scorecard(now)
+
+
+def weekly_scorecard(now):
+    """금요일 마감 후 주간 성적표 — 이번 주 review_*.json 집계 (2026-10-02).
+    스파이크 신호 자체의 T+1/5/20 채점은 CODEX signal_scorecard(일요일)가 담당하므로 중복하지 않는다."""
+    monday = now.date() - datetime.timedelta(days=now.weekday())
+    days = [(monday + datetime.timedelta(days=i)).strftime("%Y%m%d") for i in range(5)]
+    reviews = [load_json(STATE_DIR / f"review_{d}.json", None) for d in days]
+    reviews = [r for r in reviews if r]
+    if not reviews:
+        return
+    lines = [f"📊 주간 성적표 {monday.strftime('%m/%d')}~{now.strftime('%m/%d')} (아침 브리핑 후보·레벨·섹터)"]
+    cd = [r["cands"] for r in reviews if r.get("cands")]
+    if cd:
+        n = sum(c["n"] for c in cd)
+        ups = sum(c["ups"] for c in cd)
+        avg = sum(c["avg"] * c["n"] for c in cd) / max(1, n)
+        lines.append(f"• 주도주 후보 {n}종 평균 {avg:+.2f}% · 승률 {ups / max(1, n) * 100:.0f}%")
+        core = [c["core_avg"] for c in cd if c.get("core_avg") is not None]
+        if core:
+            lines.append(f"• 🔥 핵심 후보 일평균 {sum(core) / len(core):+.2f}% ({len(core)}일)")
+        sec = [c["sector_avg"] for c in cd if c.get("sector_avg") is not None]
+        if sec:
+            lines.append(f"• 섹터 연결 종목 일평균 {sum(sec) / len(sec):+.2f}% ({len(sec)}일)")
+    lv = [r["level"] for r in reviews if r.get("level")]
+    if lv:
+        cnt = {k: sum(1 for x in lv if x["result"] == k) for k in ("break_up", "break_down", "box")}
+        lines.append(f"• 코스피 레벨: 저항 돌파 {cnt['break_up']} · 지지 이탈 {cnt['break_down']} · 박스 {cnt['box']} (총 {len(lv)}일)")
+    sh = [h for r in reviews for h in (r.get("sectors") or []) if h.get("hit") is not None]
+    if sh:
+        ok = sum(1 for h in sh if h["hit"])
+        g = [h for h in sh if h["stance"] == "🟢"]
+        rd = [h for h in sh if h["stance"] == "🔴"]
+        lines.append(f"• 오늘볼섹터 적중 {ok}/{len(sh)} ({ok / len(sh) * 100:.0f}%) — 🟢 {sum(1 for h in g if h['hit'])}/{len(g)} · 🔴 {sum(1 for h in rd if h['hit'])}/{len(rd)}")
+    lines.append("")
+    lines.append("스파이크 신호 자체 성과는 일요일 신호 성적표(CODEX) 참고.")
+    send(lines)
+
+
 def read_holdings():
     """보유 종목 (watch_bot /보유추가 관리, 전 봇 공용 — 2026-08-29).
     스파이크 감시에선 워치리스트와 동일 대우 + 💼 태그."""
@@ -418,6 +594,12 @@ def send(lines):
 def tick():
     now = datetime.datetime.now()
     if not in_session(now):
+        # 15:40~15:59 — 마감 복기(하루 1회, 파일 존재로 중복 방지)
+        if now.weekday() < 5 and datetime.time(15, 40) <= now.time() <= datetime.time(15, 59):
+            try:
+                closing_review(read_handoff(), now)
+            except Exception as e:
+                print(f"[warn] 마감 복기 실패: {e}")
         return
     day = today_str()
     prep_cache = load_json(STATE_DIR / f"prep_{day}.json", {})
@@ -426,6 +608,12 @@ def tick():
     ts = now.strftime("%H:%M")
 
     hd = read_holdings()
+    handoff = read_handoff()
+    if alerts_allowed(now):
+        try:
+            level_alerts(handoff, sent, now)
+        except Exception as e:
+            print(f"[warn] 레벨 알림 실패: {e}")
     mc = read_morning_candidates()
     wl = {**read_watchlist(), **mc, **hd}  # 보유는 워치와 동일 트리거 + 💼 태그, 아침 후보는 🌅
     ranked = {}   # code -> rate (등락 상위 리스트 출신)

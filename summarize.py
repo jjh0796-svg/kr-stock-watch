@@ -816,7 +816,9 @@ def _sum_earnings(api_key: str, rcept_no: str, ctx: dict | None = None) -> str |
         if not nums:
             return None
         yoy = nums[-1] if len(nums) >= 3 and abs(nums[-1]) < 5000 else None
-        return nums[0], yoy
+        # 표 열 순서: 당해 / 전기 / 전기대비증감율 / 전년동기 / 전년동기대비증감율 → 3번째가 QoQ
+        qoq = nums[2] if len(nums) >= 5 and abs(nums[2]) < 5000 else None
+        return nums[0], yoy, qoq
 
     rev, op, ni = metric("매출액"), metric("영업이익"), metric("당기순이익")
     if not rev or not op:
@@ -843,8 +845,12 @@ def _sum_earnings(api_key: str, rcept_no: str, ctx: dict | None = None) -> str |
             return f"{name}: -"
         line = f"{name}: {_eok(m[0] * unit)}"
         notes = []
+        if len(m) > 2 and m[2] is not None:
+            notes.append(f"QoQ {m[2]:+.1f}%")
         if m[1] is not None:
             notes.append(f"YoY {m[1]:+.1f}%")
+        if name == "영업익" and rev and rev[0]:
+            notes.append(f"OPM {m[0] / rev[0] * 100:.1f}%")   # 영업이익률 (2026-10-02)
         est = cons_vals.get(cons_key) if cons_vals else None
         if est:
             actual_eok = m[0] * unit / 1e8
