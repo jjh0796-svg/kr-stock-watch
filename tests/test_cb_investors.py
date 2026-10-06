@@ -54,3 +54,28 @@ def test_conflicting_fund_definition_not_guessed():
 
 def test_mismatched_allocation_columns_not_zipped():
     assert fund_investors('',{'ISSU_NM':['펀드1','개인'],'ISSU_AMT':['100']},'100') is None
+
+def test_fund_names_without_manager_column_grouped_by_brand():
+    """10/6 에코앤드림 CB: '구분 | 집합투자기구' 표만 있고 운용사 열 없음 → 40줄 '연결 미확인'이던 것."""
+    text=render('20261006000446')
+    for part in ['에이원 (펀드명 기준 · 펀드 9개) 70.0억원','씨스퀘어 (펀드명 기준 · 펀드 5개) 50.0억원',
+                 '타임폴리오 (펀드명 기준 · 펀드 3개) 30.0억원','안다 (펀드명 기준 · 펀드 1개) 15.0억원',
+                 '비엔케이투자증권 10.0억원','배정 합계: 350.0억원 (발행금액과 일치)','※ 펀드명 기준 =']:
+        assert part in text
+    assert '연결 미확인' not in text and '본건 펀드' not in text
+    assert '케이비증권' not in text            # 신탁업자는 투자자가 아니다
+    assert len(text.encode('utf-16-le'))//2<2500
+
+def test_fund_brand():
+    from cb_investors import fund_brand
+    cases={'에이원갤럭시코스닥벤처일반사모증권투자신탁2호':'에이원','타임폴리오 코스닥벤처 Mezzanine S 5호':'타임폴리오',
+           '안다H 코스닥벤처 일반사모투자신탁 제6호(전문)':'안다','NH헤지 코벤 메자닌 일반 사모투자신탁 제4호':'NH헤지',
+           '라이프IPO코스닥벤처일반사모투자신탁제13호':'라이프','수성국민성장코스닥벤처 일반 사모투자신탁':'수성',
+           '일반사모투자신탁':'', '':''}
+    for name,want in cases.items():
+        assert fund_brand(name)==want, name
+
+def test_manager_column_missing_still_keeps_fund_name_when_brand_unknown():
+    raw='<TABLE><TR><TD>구분</TD><TD>집합투자기구</TD></TR><TR><TD>본건 펀드 1</TD><TD>일반사모투자신탁 1호</TD></TR></TABLE>'
+    text='\n'.join(fund_investors(raw,{'ISSU_NM':['X증권(본건 펀드1의 신탁업자 지위에서)'],'ISSU_AMT':['100000000']},'100000000'))
+    assert '일반사모투자신탁 1호 · 1.0억원 (운용사 미기재)' in text
