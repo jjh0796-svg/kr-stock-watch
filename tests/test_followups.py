@@ -63,3 +63,34 @@ def test_explicit_family_includes_future_receipts_but_does_not_mark_them_observe
     event['family'].append('future');send=Mock(return_value=True)
     refresh(state,'scope','key',send,lambda s:None,today=date(2026,9,20),fetch=lambda *a:[{'rcept_no':'future','report_nm':'철회신고서'}],family_lookup=lambda r:event['family'])
     assert send.call_count==1 and not event['active']
+
+def _two_events():
+    state={}
+    with patch('followup_watch.day',return_value=date(2026,10,6)):
+        observe(state,'scope',{'rcept_no':'20261001000001','corp_name':'관심회사','corp_code':'00000001','stock_code':'111111','report_nm':'유상증자결정'},['20261001000001'],{'payment':'2026-10-08'})
+        observe(state,'scope',{'rcept_no':'20261001000002','corp_name':'전체회사','corp_code':'00000002','stock_code':'222222','report_nm':'유상증자결정'},['20261001000002'],{'payment':'2026-10-08','listing':'2026-10-08'})
+    return state
+
+def test_watchlist_reply_others_bundled_once():
+    """10/7: 관심종목은 답글, 전체 구독 회사는 하루 한 통 — 같은 날 다시 돌아도 반복 안 함."""
+    from datetime import datetime
+    from followup_watch import KST
+    state=_two_events();send=Mock(return_value=True);plain=Mock(return_value=1)
+    for _ in range(3):
+        refresh(state,'scope','key',send,lambda s:None,today=date(2026,10,7),fetch=lambda *a:[],
+                watch={'111111':'관심회사'},send_plain=plain,now=datetime(2026,10,7,7,30,tzinfo=KST))
+    assert send.call_count==1 and '관심회사 · 다가오는 일정' in send.call_args.args[1]
+    assert plain.call_count==1
+    text=plain.call_args.args[0]
+    assert '유증·CB 일정 모음' in text and '전체회사' in text and '관심회사' not in text
+    assert '신주 상장 예정' in text and '10/8(목)' in text
+
+def test_bundle_waits_until_checks_done_or_0830():
+    from datetime import datetime
+    from followup_watch import KST
+    state=_two_events();plain=Mock(return_value=1)
+    # 전체회사가 아직 확인 안 됨(조회 실패) → 08:30 전엔 보내지 않음
+    fetch=lambda key,corp,*a:(_ for _ in ()).throw(RuntimeError()) if corp=='00000002' else []
+    refresh(state,'scope','key',Mock(return_value=True),lambda s:None,today=date(2026,10,7),fetch=fetch,
+            watch={'111111':'관심회사'},send_plain=plain,now=datetime(2026,10,7,7,30,tzinfo=KST))
+    plain.assert_not_called()

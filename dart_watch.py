@@ -578,12 +578,14 @@ def send_disclosure(state,item,text):
     return send_filing(state,item,text,sender,lambda s:save_state(STATE_FILE,s),token,chat,
                        followup_dates=dates,reply_markup=keyboard(state,scope,ref))
 
-def check_followups(api_key,state):
+def check_followups(api_key,state,cfg=None):
     if DRY_RUN:return
     token=os.environ.get('TELEGRAM_BOT_TOKEN','');chat=os.environ.get('TELEGRAM_CHAT_ID','')
+    # 10/7: 관심종목은 원래 공시에 답글, 전체 구독으로 들어온 회사는 하루 한 통 묶음(followup_watch.digest_text)
+    watch=merged_watchlist(cfg) if cfg is not None else None
     refresh_followups(state,scope_for(token,chat),api_key,
         lambda item,text:send_filing(state,item,text,tg_send,lambda s:save_state(STATE_FILE,s),token,chat,parse_mode=None),
-        lambda s:save_state(STATE_FILE,s))
+        lambda s:save_state(STATE_FILE,s),watch=watch,send_plain=lambda text:tg_send(text))
 
 def edit_existing_disclosure(state,item,text=None):
     """Repair an existing message, never emit a second notification on edit failure."""
@@ -723,7 +725,7 @@ def main() -> None:
         try:
             poll_once(api_key, state, cfg)
             retry_pending_summaries(api_key, state)
-            check_followups(api_key,state)
+            check_followups(api_key,state,cfg)
         except Exception as e:  # 일시 오류로 잡 전체가 죽지 않게
             print(f"[폴링 오류] {type(e).__name__}: {e}")
         remaining = deadline - time.monotonic()
