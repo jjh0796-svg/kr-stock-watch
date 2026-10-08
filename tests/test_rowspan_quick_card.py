@@ -50,5 +50,5 @@ def test_stamp_receipt_second_line():
     stamped = dart_watch.stamp_receipt(base, item, {"20261007000391": "16:44"})
     assert stamped.split("\n")[1] == "🕒 접수 2026.10.07 16:44"
     fallback = dart_watch.stamp_receipt(base, item, {})
-    assert fallback.split("\n")[1].startswith("🕒 감지 ") and "접수 시각 미확인" in fallback
+    assert fallback.split("\n")[1].startswith("🕒 감지 ") and "미확인" not in fallback
     assert fallback.split("\n")[0] == base.split("\n")[0] and fallback.endswith("https://dart.fss.or.kr/x")

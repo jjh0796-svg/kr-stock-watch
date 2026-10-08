@@ -640,6 +640,11 @@ def _complete_card(item,base,summary):
     return body+('\n\n'+footer if footer else '')
 
 
+WAIT_NOTE='⏳ 요약 준비 중 — 봇이 읽는 DART 자료 파일이 접수 뒤 수십 분 늦게 열립니다. 열리면 이 메시지에 채워 넣고, 원문은 아래 링크에서 바로 볼 수 있습니다.'
+WAIT_NOTE_ISSUE='⏳ 투자자·운용사·조정 조항은 DART 자료 파일이 열리면 이 메시지에 채워 넣습니다(원문은 아래 링크에서 바로 확인).'
+GIVE_UP_NOTE='ℹ️ 요약 없음 — DART 자료 파일이 3시간 넘게 열리지 않았습니다. 원문은 아래 링크에서 확인해 주세요.'
+
+
 def receipt_times(day_dot: str, wanted: set[str] | None = None, max_pages: int = 3) -> dict[str, str]:
     """DART 최근공시 목록(dart.fss.or.kr/dsac001/search.ax)에서 접수번호→접수시각(HH:MM).
     opendart list.json엔 날짜만 있어 시각은 이 페이지에서만 얻는다 (10/8 사용자 요청: 공시 시각 표기).
@@ -679,7 +684,7 @@ def stamp_receipt(base: str, item: dict, times: dict[str, str]) -> str:
     """알림 둘째 줄에 접수 시각. DART 목록에 없으면 봇이 본 시각을 '감지'로 표시(폴링 1분 간격이라 접수와 거의 같다)."""
     rn=item.get('rcept_no','');d=item.get('rcept_dt','') or now_kst().strftime('%Y%m%d')
     day=f'{d[:4]}.{d[4:6]}.{d[6:8]}'
-    line=f'🕒 접수 {day} {times[rn]}' if rn in times else f'🕒 감지 {now_kst():%Y.%m.%d %H:%M} (접수 시각 미확인)'
+    line=f'🕒 접수 {day} {times[rn]}' if rn in times else f'🕒 감지 {now_kst():%Y.%m.%d %H:%M}'
     head,_,rest=base.partition('\n')
     return f'{head}\n{line}\n{rest}' if rest else f'{head}\n{line}'
 
@@ -703,7 +708,9 @@ def poll_once(api_key: str, state: dict, cfg: dict) -> None:
             # DART 원문은 접수 뒤 수십 분 늦게 열리는 일이 흔하므로 탐지 즉시 보낸다: 발행결정은 구조화 API 1차 카드,
             # 그 밖(공급계약·잠정실적 등)은 제목·링크 카드. 원문이 열리면 retry_pending_summaries가 같은 메시지를 완성 카드로 고쳐 쓴다.
             quick=issuance_quick(it,api_key) if is_issue else None
-            first=(quick+'\n\n⏳ 투자자·운용사·조정 조항은 원문 공개 후 이 메시지에 갱신') if quick else '⏳ 원문이 아직 공개되지 않았습니다 — 요약은 공개 후 이 메시지에 갱신'
+            # 10/8 사용자: 'DART 화면엔 다 있는데 왜 미공개?' — 안 열리는 건 사람이 보는 화면이 아니라 봇이 읽는 자료 파일
+            # (opendart document.xml, 접수 뒤 15~40분 늦게 열림)이다. 문구는 그 뜻으로 쓰고 원문 링크는 바로 볼 수 있다고 알린다.
+            first=(quick+'\n\n'+WAIT_NOTE_ISSUE) if quick else WAIT_NOTE
             if not send_disclosure(state,it,_complete_card(it,base,first)):
                 seen.pop(rn,None);continue
             print('[SENT first card]',rn,'quick' if quick else 'base',it.get('corp_name',''),now_kst().strftime('%H:%M:%S'))
@@ -742,6 +749,9 @@ def retry_pending_summaries(api_key: str, state: dict) -> None:
         if expired:
             state.setdefault('unresolved_summaries',{})[rn]={**info,'status':'needs_review'}
             del pending[rn]
+            if not info.get('single_delivery') and info.get('base_msg'):
+                # 1차 카드가 나가 있다 — '준비 중' 줄을 '요약 없음'으로 바꿔 사용자가 더 기다리지 않게 (10/8)
+                edit_existing_disclosure(state,item,_complete_card(item,info['base_msg'],GIVE_UP_NOTE))
             print('[공시 발송 보류: 원문 요약 미완료]',rn)
     save_state(STATE_FILE,state)
 

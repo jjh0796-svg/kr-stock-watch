@@ -16,13 +16,13 @@ def test_unavailable_sends_first_card_then_edits_same_message():
     with patch.object(d,'fetch_today_list',return_value=[ITEM]),patch.object(d,'receipt_times',return_value={}),patch.object(d,'merged_watchlist',return_value={}),patch.object(d,'classify',return_value=BASE),patch.object(d,'summarize',return_value=None),patch.object(d,'issuance_quick',return_value=None),patch.object(d,'stock_snapshot',return_value=None),patch.object(d,'save_state'),patch.object(d,'send_disclosure',return_value=True) as send:
         d.poll_once('k',state,{})
         text=send.call_args.args[2]
-        assert send.call_count==1 and '원문이 아직 공개되지 않았습니다' in text
+        assert send.call_count==1 and '요약 준비 중' in text
         assert text.startswith('공시 A') and text.endswith('https://example.com/original')
     assert state['pending_sum'][ITEM['rcept_no']]['single_delivery'] is False
     with patch.object(d,'summarize',return_value=READY),patch.object(d,'stock_snapshot',return_value=None),patch.object(d,'save_state'),patch.object(d,'send_disclosure') as send,patch.object(d,'edit_existing_disclosure',return_value=True) as edit:
         d.retry_pending_summaries('k',state);d.retry_pending_summaries('k',state)
         send.assert_not_called()
-        assert edit.call_count==1 and READY in compact(edit.call_args.args[2]) and '원문이 아직' not in edit.call_args.args[2]
+        assert edit.call_count==1 and READY in compact(edit.call_args.args[2]) and '요약 준비 중' not in edit.call_args.args[2]
     assert not state['pending_sum']
 
 def test_issuance_first_card_comes_from_structured_api():
@@ -31,7 +31,7 @@ def test_issuance_first_card_comes_from_structured_api():
     with patch.object(d,'fetch_today_list',return_value=[ITEM]),patch.object(d,'receipt_times',return_value={}),patch.object(d,'merged_watchlist',return_value={}),patch.object(d,'classify',return_value=BASE),patch.object(d,'summarize',return_value=None),patch.object(d,'issuance_quick',return_value=quick),patch.object(d,'stock_snapshot',return_value=None),patch.object(d,'save_state'),patch.object(d,'send_disclosure',return_value=True) as send:
         d.poll_once('k',state,{})
         text=send.call_args.args[2]
-        assert quick in compact(text) and '투자자·운용사·조정 조항은 원문 공개 후' in text and '원문이 아직' not in text
+        assert quick in compact(text) and '투자자·운용사·조정 조항은' in text and '요약 준비 중' not in text
     assert state['pending_sum'][ITEM['rcept_no']]['single_delivery'] is False
 
 def test_first_card_send_failure_leaves_item_unseen_for_next_poll():
