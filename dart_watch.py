@@ -26,7 +26,7 @@ import requests
 
 from common import (DRY_RUN, UA_HEADERS, esc, load_state, load_watch_config,
                     load_watchlist, now_kst, save_state, save_watch_config, tg_send)
-from summarize import company_card, stock_snapshot, summarize, summarizable
+from summarize import company_card, issuance_quick, stock_snapshot, summarize, summarizable
 from filing_threads import send_filing
 from issue_terms import needs_retry
 from followup_watch import dates_from_summary, refresh as refresh_followups, scope_for
@@ -640,18 +640,59 @@ def _complete_card(item,base,summary):
     return body+('\n\n'+footer if footer else '')
 
 
+def receipt_times(day_dot: str, wanted: set[str] | None = None, max_pages: int = 3) -> dict[str, str]:
+    """DART 최근공시 목록(dart.fss.or.kr/dsac001/search.ax)에서 접수번호→접수시각(HH:MM).
+    opendart list.json엔 날짜만 있어 시각은 이 페이지에서만 얻는다 (10/8 사용자 요청: 공시 시각 표기).
+    한 쪽 100건(최신순)이라 폴링 1분 안의 신규 건은 1쪽에 있고, 찾는 건이 남으면 3쪽까지 넘긴다.
+    실패하면 빈 dict — 호출자가 감지 시각으로 대체."""
+    out={};wanted=set(wanted or ())
+    try:
+        for page in range(1,max_pages+1):
+            resp=requests.post('https://dart.fss.or.kr/dsac001/search.ax',
+                headers={**UA_HEADERS,'Referer':'https://dart.fss.or.kr/dsac001/mainAll.do','X-Requested-With':'XMLHttpRequest'},
+                data={'currentPage':page,'maxResults':100,'selectDate':day_dot,'mdayCnt':0},timeout=(10,20))
+            rows=re.findall(r'<tr\b.*?</tr>',resp.text,re.S|re.I)
+            for tr in rows:
+                t=re.search(r'<td>\s*(\d{2}:\d{2})\s*</td>',tr);n=re.search(r'rcpNo=(\d{14})',tr)
+                if t and n:out.setdefault(n[1],t[1])
+            if len(rows)<50 or not wanted or wanted<=set(out):break
+    except Exception as exc:
+        print('[접수시각 조회 실패]',type(exc).__name__)
+    return out
+
+
+def stamp_receipt(base: str, item: dict, times: dict[str, str]) -> str:
+    """알림 둘째 줄에 접수 시각. DART 목록에 없으면 봇이 본 시각을 '감지'로 표시(폴링 1분 간격이라 접수와 거의 같다)."""
+    rn=item.get('rcept_no','');d=item.get('rcept_dt','') or now_kst().strftime('%Y%m%d')
+    day=f'{d[:4]}.{d[4:6]}.{d[6:8]}'
+    line=f'🕒 접수 {day} {times[rn]}' if rn in times else f'🕒 감지 {now_kst():%Y.%m.%d %H:%M} (접수 시각 미확인)'
+    head,_,rest=base.partition('\n')
+    return f'{head}\n{line}\n{rest}' if rest else f'{head}\n{line}'
+
+
 def poll_once(api_key: str, state: dict, cfg: dict) -> None:
     watch=merged_watchlist(cfg);seen=state.setdefault('seen',{});first_run=not seen
     items=fetch_today_list(api_key,first_run,seen)
     new_items=[it for it in items if it.get('rcept_no') and it['rcept_no'] not in seen]
+    times=receipt_times(now_kst().strftime('%Y.%m.%d'),{it['rcept_no'] for it in new_items}) if new_items and not first_run and not DRY_RUN else {}
     for it in reversed(new_items):
         rn=it['rcept_no'];seen[rn]=it.get('rcept_dt','')
         if first_run:continue
         base=classify(it,watch,cfg)
         if not base:continue
+        base=stamp_receipt(base,it,times)
         summary=summarize(it,api_key)
-        if not _summary_ready(it,summary) and (summarizable(it.get('report_nm','')) or ISSUE_RE.search(re.sub(r'\s+','',it.get('report_nm','')))):
-            state.setdefault('pending_sum',{})[rn]=_pending_info(it,base)
+        is_issue=bool(ISSUE_RE.search(re.sub(r'\s+','',it.get('report_nm',''))))
+        if not _summary_ready(it,summary) and (summarizable(it.get('report_nm','')) or is_issue):
+            info=_pending_info(it,base)
+            quick=issuance_quick(it,api_key) if is_issue else None
+            if quick:
+                # 10/7 나노팀 CB: 원문이 45분 늦게 열려 알림도 늦었다 — 구조화 API로 1차 카드를 먼저 보내고,
+                # 원문이 열리면 retry_pending_summaries가 이 메시지를 완성 카드(투자자·운용사)로 고쳐 쓴다.
+                if not send_disclosure(state,it,_complete_card(it,base,quick+'\n\n⏳ 투자자·운용사·조정 조항은 원문 공개 후 이 메시지에 갱신')):
+                    seen.pop(rn,None);continue
+                info['single_delivery']=False
+            state.setdefault('pending_sum',{})[rn]=info
             save_state(STATE_FILE,state)
             continue  # No placeholder, incomplete card, or first notification.
         msg=_complete_card(it,base,summary) if summary else base

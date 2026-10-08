@@ -40,17 +40,33 @@ def number(value):
     except InvalidOperation:return None
 
 class TableRows(HTMLParser):
+    """표를 행 리스트로. ROWSPAN으로 세로 병합된 셀은 아래 행에도 같은 값을 채운다.
+    (10/7 나노팀 CB: 운용사 칸이 펀드 2~3개에 걸쳐 병합돼 있어 아래 행에서 신탁업자가 운용사 자리로 밀려 읽혔다)"""
     def __init__(self):
-        super().__init__();self.rows=[];self.row=[];self.cell=None
+        super().__init__();self.rows=[];self.row=[];self.cell=None;self.col=0;self.span=1;self.carry={}
+    def _fill(self):
+        while self.col in self.carry:
+            value,left=self.carry[self.col];self.row.append(value)
+            if left>1:self.carry[self.col]=(value,left-1)
+            else:del self.carry[self.col]
+            self.col+=1
     def handle_starttag(self,tag,attrs):
-        if tag=='tr':self.row=[]
-        if tag in ('td','th'):self.cell=[]
+        if tag=='tr':self.row=[];self.col=0
+        if tag in ('td','th'):
+            self._fill();self.cell=[]
+            try:self.span=max(1,int(dict(attrs).get('rowspan') or 1))
+            except ValueError:self.span=1
     def handle_data(self,data):
         if self.cell is not None:self.cell.append(data)
     def handle_endtag(self,tag):
         if tag in ('td','th') and self.cell is not None:
-            self.row.append(re.sub(r'\s+',' ',''.join(self.cell)).strip());self.cell=None
-        if tag=='tr' and self.row:self.rows.append(self.row)
+            value=re.sub(r'\s+',' ',''.join(self.cell)).strip();self.row.append(value);self.cell=None
+            if self.span>1:self.carry[self.col]=(value,self.span-1)
+            self.col+=1
+        if tag=='tr':
+            self._fill()
+            if self.row:self.rows.append(self.row)
+        if tag=='table':self.carry={}
 
 def subsidiary_summary(raw):
     """KRX subsidiary capital contributions use plain tables, often no per-share amount."""

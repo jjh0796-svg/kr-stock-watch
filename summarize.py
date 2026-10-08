@@ -943,6 +943,77 @@ def _informative(s: str | None) -> bool:
     return bool(s) and bool(re.search(r"\d{2,}|\d\s*[억조원주%회]", s))
 
 
+_BOND_KIND = {"cvbdIsDecsn": "CB", "bdwtIsDecsn": "BW", "exbdIsDecsn": "EB"}
+
+
+def _quick_bond_card(row: dict, kind: str) -> str:
+    """구조화 API 한 행으로 issue_terms 완성 카드와 같은 순서의 1차 카드 (투자자·조정 조항은 원문이 열려야 안다)."""
+    label = {"EB": "교환", "BW": "행사", "CB": "전환"}[kind]
+
+    def g(*keys):
+        for k in keys:
+            v = str(row.get(k) or "").strip()
+            if v and v != "-":
+                return v
+        return ""
+
+    def g_end(suffix):  # BW·EB는 키 머리글자가 달라서(ex/bw…) 꼬리로 찾는다
+        for k, v in row.items():
+            if k.endswith(suffix) and str(v).strip() not in ("", "-"):
+                return str(v).strip()
+        return ""
+
+    lines = ["<b>발행조건 · 접수 직후 1차(구조화 공시 기준)</b>",
+             f"{kind} {g('bd_tm') or '-'}회차 · {g('bdis_mthn') or '-'}",
+             f"발행금액: {_eok(_num(g('bd_fta')))}", ""]
+    prc = g("cv_prc", "ex_prc", "act_prc") or g_end("_prc")
+    if prc:
+        lines.append(f"{label}가액: {prc}원")
+    stk, cnt = g_end("stk_knd"), g_end("stk_cnt")
+    if stk or cnt:
+        lines.append(f"{label}대상: {esc(stk or '-')} · {cnt or '-'}주")
+    if g_end("tisstk_vs"):
+        lines.append(f"주식총수 대비: {g_end('tisstk_vs')}% (공시 기재 기준)")
+    if g("bd_intr_ex") or g("bd_intr_sf"):
+        lines.append(f"표면/만기 이자율: {g('bd_intr_ex') or '-'}% / {g('bd_intr_sf') or '-'}%")
+    if g("pymd") or g("bd_mtd"):
+        lines.append(f"납입일: {g('pymd') or '-'} · 만기일: {g('bd_mtd') or '-'}")
+    if g_end("rqpd_bgd") or g_end("rqpd_edd"):
+        lines.append(f"{label}청구: {g_end('rqpd_bgd') or '-'} ~ {g_end('rqpd_edd') or '-'}")
+    low = g_end("lwtrsprc")
+    if low:
+        lines.append(f"가격조정 최저가: {low}원")
+    uses = [(lab, _num(g(k))) for k, lab in (("fdpp_fclt", "시설"), ("fdpp_bsninh", "영업양수"), ("fdpp_op", "운영"),
+                                           ("fdpp_dtrp", "채무상환"), ("fdpp_ocsa", "타법인증권취득"), ("fdpp_etc", "기타"))]
+    uses = [(lab, v) for lab, v in uses if v]
+    if uses:
+        lines += ["", "자금용도: " + " · ".join(f"{lab} {_eok(v)}" for lab, v in uses)]
+    return "\n".join(lines)
+
+
+def issuance_quick(item: dict, api_key: str) -> str | None:
+    """발행결정(유증·CB·BW·EB) 접수 직후 원문(document.xml)이 아직 안 열릴 때 구조화 API만으로 만드는 1차 카드.
+    10/7 나노팀 CB가 원문을 45분 기다리느라 알림도 그만큼 늦었다 — 이 카드를 먼저 보내고 원문이 열리면 같은 메시지를 완성 카드로 갱신한다."""
+    title = re.sub(r"\s+", "", item.get("report_nm") or "")
+    code = (item.get("stock_code") or "").strip()
+    corp_code, rcept_dt, rcept_no = item.get("corp_code") or "", item.get("rcept_dt") or "", item.get("rcept_no") or ""
+    if not corp_code or not rcept_dt:
+        return None
+    try:
+        for pat, api, _ in _RULES:
+            if not re.search(pat, title) or api not in (*_BOND_KIND, "piicDecsn", "pifricDecsn"):
+                continue
+            row = _pick(_dart_rows(api, api_key, corp_code, rcept_dt), rcept_no)
+            if not row:
+                return None
+            if api in _BOND_KIND:
+                return _quick_bond_card(row, _BOND_KIND[api])
+            return _sum_rights_issue(row, code)  # api_key를 안 넘겨 원문 조회 없이 구조화 값만
+    except Exception as e:
+        print(f"[1차 카드 실패] {rcept_no} {title[:30]}: {type(e).__name__}: {e}")
+    return None
+
+
 def summarize(item: dict, api_key: str) -> str | None:
     """탐지된 공시 1건의 내용 요약 (실패 시 None — 알림은 요약 없이 나간다)."""
     title = re.sub(r"\s+", "", item.get("report_nm") or "")
