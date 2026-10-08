@@ -646,9 +646,11 @@ def receipt_times(day_dot: str, wanted: set[str] | None = None, max_pages: int =
     한 쪽 100건(최신순)이라 폴링 1분 안의 신규 건은 1쪽에 있고, 찾는 건이 남으면 3쪽까지 넘긴다.
     실패하면 빈 dict — 호출자가 감지 시각으로 대체."""
     out={};wanted=set(wanted or ())
+    global _RECEIPT_LOOKUP_BLOCKED
+    if _RECEIPT_LOOKUP_BLOCKED:return out   # 이 잡에서 이미 실패 — 폴링마다 20초씩 기다리지 않는다 (다음 잡에서 다시 시도)
     headers={**UA_HEADERS,'Referer':'https://dart.fss.or.kr/dsac001/mainAll.do','X-Requested-With':'XMLHttpRequest'}
     def fetch(page,verify=True):
-        return requests.post('https://dart.fss.or.kr/dsac001/search.ax',headers=headers,timeout=(10,20),verify=verify,
+        return requests.post('https://dart.fss.or.kr/dsac001/search.ax',headers=headers,timeout=(5,10),verify=verify,
             data={'currentPage':page,'maxResults':100,'selectDate':day_dot,'mdayCnt':0})
     try:
         for page in range(1,max_pages+1):
@@ -663,8 +665,14 @@ def receipt_times(day_dot: str, wanted: set[str] | None = None, max_pages: int =
                 if t and n:out.setdefault(n[1],t[1])
             if len(rows)<50 or not wanted or wanted<=set(out):break
     except Exception as exc:
-        print('[접수시각 조회 실패]',type(exc).__name__,str(exc)[:160])
+        # 10/8: GitHub 러너에서는 SSLError·ReadTimeout으로 못 읽는다(국내·오라클 서버는 0.5초에 정상) — DART 웹이 해외 클라우드 IP를 막는 듯.
+        # 그 경우 알림은 '감지 시각'으로 나간다(폴링 30초라 접수와 1분 안쪽).
+        _RECEIPT_LOOKUP_BLOCKED=True
+        print('[접수시각 조회 실패 — 이 잡에서는 감지 시각 사용]',type(exc).__name__,str(exc)[:160])
     return out
+
+
+_RECEIPT_LOOKUP_BLOCKED=False
 
 
 def stamp_receipt(base: str, item: dict, times: dict[str, str]) -> str:
