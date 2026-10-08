@@ -699,18 +699,21 @@ def poll_once(api_key: str, state: dict, cfg: dict) -> None:
         is_issue=bool(ISSUE_RE.search(re.sub(r'\s+','',it.get('report_nm',''))))
         if not _summary_ready(it,summary) and (summarizable(it.get('report_nm','')) or is_issue):
             info=_pending_info(it,base)
+            # 10/7 나노팀 CB가 원문(document.xml) 공개를 45분 기다리느라 알림도 늦었고, 10/8 공급계약 3건도 15~40분 늦었다.
+            # DART 원문은 접수 뒤 수십 분 늦게 열리는 일이 흔하므로 탐지 즉시 보낸다: 발행결정은 구조화 API 1차 카드,
+            # 그 밖(공급계약·잠정실적 등)은 제목·링크 카드. 원문이 열리면 retry_pending_summaries가 같은 메시지를 완성 카드로 고쳐 쓴다.
             quick=issuance_quick(it,api_key) if is_issue else None
-            if quick:
-                # 10/7 나노팀 CB: 원문이 45분 늦게 열려 알림도 늦었다 — 구조화 API로 1차 카드를 먼저 보내고,
-                # 원문이 열리면 retry_pending_summaries가 이 메시지를 완성 카드(투자자·운용사)로 고쳐 쓴다.
-                if not send_disclosure(state,it,_complete_card(it,base,quick+'\n\n⏳ 투자자·운용사·조정 조항은 원문 공개 후 이 메시지에 갱신')):
-                    seen.pop(rn,None);continue
-                info['single_delivery']=False
+            first=(quick+'\n\n⏳ 투자자·운용사·조정 조항은 원문 공개 후 이 메시지에 갱신') if quick else '⏳ 원문이 아직 공개되지 않았습니다 — 요약은 공개 후 이 메시지에 갱신'
+            if not send_disclosure(state,it,_complete_card(it,base,first)):
+                seen.pop(rn,None);continue
+            print('[SENT first card]',rn,'quick' if quick else 'base',it.get('corp_name',''),now_kst().strftime('%H:%M:%S'))
+            info['single_delivery']=False
             state.setdefault('pending_sum',{})[rn]=info
             save_state(STATE_FILE,state)
-            continue  # No placeholder, incomplete card, or first notification.
-        msg=_complete_card(it,base,summary) if summary else base
-        if not send_disclosure(state,it,msg):seen.pop(rn,None)
+            continue
+        if send_disclosure(state,it,_complete_card(it,base,summary) if summary else base):
+            print('[SENT]',rn,it.get('corp_name',''),now_kst().strftime('%H:%M:%S'))
+        else:seen.pop(rn,None)
     if len(seen)>SEEN_CAP:
         for k in sorted(seen,key=lambda x:seen[x])[:len(seen)-SEEN_CAP]:del seen[k]
     save_state(STATE_FILE,state)
