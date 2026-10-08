@@ -646,18 +646,24 @@ def receipt_times(day_dot: str, wanted: set[str] | None = None, max_pages: int =
     한 쪽 100건(최신순)이라 폴링 1분 안의 신규 건은 1쪽에 있고, 찾는 건이 남으면 3쪽까지 넘긴다.
     실패하면 빈 dict — 호출자가 감지 시각으로 대체."""
     out={};wanted=set(wanted or ())
+    headers={**UA_HEADERS,'Referer':'https://dart.fss.or.kr/dsac001/mainAll.do','X-Requested-With':'XMLHttpRequest'}
+    def fetch(page,verify=True):
+        return requests.post('https://dart.fss.or.kr/dsac001/search.ax',headers=headers,timeout=(10,20),verify=verify,
+            data={'currentPage':page,'maxResults':100,'selectDate':day_dot,'mdayCnt':0})
     try:
         for page in range(1,max_pages+1):
-            resp=requests.post('https://dart.fss.or.kr/dsac001/search.ax',
-                headers={**UA_HEADERS,'Referer':'https://dart.fss.or.kr/dsac001/mainAll.do','X-Requested-With':'XMLHttpRequest'},
-                data={'currentPage':page,'maxResults':100,'selectDate':day_dot,'mdayCnt':0},timeout=(10,20))
+            try:resp=fetch(page)
+            except requests.exceptions.SSLError as exc:
+                # 10/8 첫 실행: GitHub 러너에서만 SSLError(국내·오라클 서버는 정상). 인증서 검증 문제면 한 번 더, 차단이면 그대로 실패.
+                import urllib3;urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+                print('[접수시각 SSL 재시도]',str(exc)[:160]);resp=fetch(page,verify=False)
             rows=re.findall(r'<tr\b.*?</tr>',resp.text,re.S|re.I)
             for tr in rows:
                 t=re.search(r'<td>\s*(\d{2}:\d{2})\s*</td>',tr);n=re.search(r'rcpNo=(\d{14})',tr)
                 if t and n:out.setdefault(n[1],t[1])
             if len(rows)<50 or not wanted or wanted<=set(out):break
     except Exception as exc:
-        print('[접수시각 조회 실패]',type(exc).__name__)
+        print('[접수시각 조회 실패]',type(exc).__name__,str(exc)[:160])
     return out
 
 
