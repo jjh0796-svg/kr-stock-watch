@@ -79,6 +79,21 @@ def find_base_date() -> tuple[str, list[dict]] | tuple[None, None]:
     return None, None
 
 
+def latest_trading_day() -> str | None:
+    """네이버 일별 시세(삼성전자·SK하이닉스)의 가장 최근 거래일 YYYYMMDD. 장이 끝난 뒤 바로 반영되고 휴장일은 건너뛴다."""
+    today = now_kst().strftime("%Y%m%d")
+    for code in ("005930", "000660"):
+        try:
+            days = [t.get("bizdate") or "" for t in naver_trend(code)]
+            # 장중에 수동 실행하면 네이버엔 오늘 줄이 생긴다 — 오늘은 KRX 마감 데이터가 없으니 건너뛴다
+            days = [d for d in days if re.fullmatch(r"20\d{6}", d) and d != today]
+            if days:
+                return days[0]
+        except Exception as e:
+            print(f"[최근 거래일 확인 실패] {code}: {type(e).__name__}")
+    return None
+
+
 def volume_history(base_dd: str, days: int = 20) -> dict[str, list[float]]:
     """기준일 이전 최대 `days` 거래일의 종목별 거래량 이력."""
     hist: dict[str, list[float]] = {}
@@ -389,19 +404,28 @@ def main() -> None:
     # 새 기준일 데이터가 아직 안 올라온 시각이면 5분 간격으로 잠시 기다린다
     # (아침 슬롯이 KRX OpenAPI 게시보다 먼저 시작해도 놓치지 않게)
     wait_tries = int(os.environ.get("DATA_WAIT_TRIES", "6"))
+    # 10/12: 10/9 휴장 뒤 월요일 아침에 KRX OpenAPI가 아직 10/7까지만 올려 둔 상태라 '10/7 마감 스캔'이 나갔다
+    # (수급은 네이버라 10/8). 네이버 일별 시세의 최근 거래일을 '있어야 할 기준일'로 삼고, KRX가 그보다 옛날이면
+    # 아직 게시 전으로 보고 기다린다. 끝까지 안 올라오면 옛 날짜로 보내지 않고 다음 슬롯(08:30 백업)에 맡긴다.
+    expected = latest_trading_day()
     base_dd, rows = None, None
     for attempt in range(wait_tries):
         base_dd, rows = find_base_date()
-        if base_dd and (state.get("last_scanned") != base_dd or os.environ.get("FORCE_RESCAN")):
+        fresh = base_dd and (not expected or base_dd >= expected)
+        if fresh and (state.get("last_scanned") != base_dd or os.environ.get("FORCE_RESCAN")):
             break
         print(f"새 기준일 데이터 대기 ({attempt + 1}/{wait_tries}) — 5분 후 재확인"
-              f" (현재 최신: {base_dd or '없음'})")
+              f" (현재 최신: {base_dd or '없음'}, 있어야 할 기준일: {expected or '미확인'})")
         time.sleep(300)
     if not base_dd:
         print("최근 거래일 데이터를 찾지 못함 — 종료")
         return
-    if state.get("last_scanned") == base_dd and not os.environ.get("FORCE_RESCAN"):
-        print(f"{base_dd} 이미 스캔함 — 종료")
+    if expected and base_dd < expected and not os.environ.get("FORCE_RESCAN"):
+        print(f"KRX 최신 {base_dd} < 최근 거래일 {expected} — 아직 게시 전, 옛 날짜로 보내지 않고 종료(다음 슬롯에서 재시도)")
+        return
+    last = state.get("last_scanned") or ""
+    if last >= base_dd and not os.environ.get("FORCE_RESCAN"):
+        print(f"{base_dd} 이미 스캔함(마지막 {last}) — 종료")
         return
     print(f"기준일 {base_dd} · 종목 {len(rows)}개")
 
