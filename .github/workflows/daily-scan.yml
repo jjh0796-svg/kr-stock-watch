@@ -15,6 +15,12 @@ on:
         required: false
         type: boolean
         default: false
+      mode:
+        description: "scan = 아침 정식 스캔 / prepare = 저녁 예비본 저장(발송 없음)"
+        required: false
+        type: choice
+        options: [scan, prepare]
+        default: scan
       trigger_source:
         description: "호출자 라벨"
         required: false
@@ -26,6 +32,9 @@ on:
     # (기존 19:05 저녁 본실행은 KRX OpenAPI에 당일 데이터가 없어 항상 헛돌았음 — 폐지)
     - cron: "30 22 * * 0-4"  # KST 07:30 예약 → 실제 ~07:50 시작, 데이터 대기 루프 포함
     - cron: "30 23 * * 0-4"  # KST 08:30 예약 백업 (본 실행이 놓친 날만, 상태로 중복 방지)
+    # 2026-10-12 저녁 예비본: 장 마감 뒤 네이버 확정 시세로 같은 스캔을 만들어 저장만 한다(발송 없음).
+    # 아침에 KRX 자료가 08:20까지 안 오거나 52주 계산이 실패하면 이 예비본을 보낸다.
+    - cron: "30 10 * * 1-5"  # KST 19:30 예약 → 실제 ~19:50 (외국인·기관 확정치 반영 뒤)
 
 concurrency:
   group: daily-scan
@@ -97,6 +106,7 @@ jobs:
           WATCHLIST: ${{ secrets.WATCHLIST }}
           DRY_RUN: ${{ inputs.dry_run == true && '1' || '' }}
           FORCE_RESCAN: ${{ inputs.force_rescan == true && '1' || '' }}
+          SCAN_MODE: ${{ (github.event.schedule == '30 10 * * 1-5' || inputs.mode == 'prepare') && 'prepare' || 'scan' }}
           # KRX OpenAPI의 전일 데이터 게시가 08시를 넘는 날 발견(2026-08-28 —
           # 07:30 실행이 30분 대기 후 빈손 종료, 미발송). 5분×14회 = 최대 08:40대까지 대기.
           # 공개 repo라 러너 분은 무제한 — 대기 낭비 무해.

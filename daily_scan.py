@@ -79,19 +79,73 @@ def find_base_date() -> tuple[str, list[dict]] | tuple[None, None]:
     return None, None
 
 
-def latest_trading_day() -> str | None:
-    """네이버 일별 시세(삼성전자·SK하이닉스)의 가장 최근 거래일 YYYYMMDD. 장이 끝난 뒤 바로 반영되고 휴장일은 건너뛴다."""
+def latest_trading_day(include_today: bool = False) -> str | None:
+    """네이버 일별 시세(삼성전자·SK하이닉스)의 가장 최근 거래일 YYYYMMDD. 장이 끝난 뒤 바로 반영되고 휴장일은 건너뛴다.
+    include_today=False(아침 정식 스캔): 장중 수동 실행 때 생기는 오늘 줄은 KRX 마감 자료가 없으니 건너뛴다.
+    include_today=True(저녁 예비본): 오늘이 거래일이면 오늘."""
     today = now_kst().strftime("%Y%m%d")
     for code in ("005930", "000660"):
         try:
             days = [t.get("bizdate") or "" for t in naver_trend(code)]
-            # 장중에 수동 실행하면 네이버엔 오늘 줄이 생긴다 — 오늘은 KRX 마감 데이터가 없으니 건너뛴다
-            days = [d for d in days if re.fullmatch(r"20\d{6}", d) and d != today]
+            days = [d for d in days if re.fullmatch(r"20\d{6}", d) and (include_today or d != today)]
             if days:
                 return days[0]
         except Exception as e:
             print(f"[최근 거래일 확인 실패] {code}: {type(e).__name__}")
     return None
+
+
+# ─── 저녁 예비본: 네이버 전 종목 확정 시세 (2026-10-12) ─────────────────────────
+# 아침 정식 스캔은 KRX OpenAPI(전일 자료가 다음 날 아침 게시)로 만든다. 10/12 아침 KRX가 10/8 자료를 순간 빈 값으로
+# 돌려줘 10/7 스캔이 재발송된 뒤, 장 마감 뒤 저녁에 네이버 전 종목 시세(거래소와 같은 값)로 같은 스캔을 미리 만들어
+# 두고, 아침에 KRX 자료가 끝내 안 오거나 52주 계산이 실패하면 그 예비본을 대신 보낸다. 저녁엔 아무것도 보내지 않는다.
+
+def _hangeul_won(text: str) -> float | None:
+    """'1조 2,345억원' / '3,048억원' / '512만원' → 원. 못 읽으면 None."""
+    text = (text or "").replace(",", "").replace(" ", "")
+    if not re.search(r"\d", text):
+        return None
+    total = 0.0
+    for num, unit in re.findall(r"(\d+(?:\.\d+)?)(조|억|만)", text):
+        total += float(num) * {"조": 1e12, "억": 1e8, "만": 1e4}[unit]
+    return total or None
+
+
+def naver_daily_rows(day: str) -> list[dict]:
+    """네이버 코스피·코스닥 전 종목(주식만) 시세를 KRX stk/ksq_bydd_trd와 같은 키로. 기준일이 day가 아니면 예외."""
+    rows: list[dict] = []
+    stamp = f"{day[:4]}-{day[4:6]}-{day[6:]}"
+    for mkt, label in (("KOSPI", "코스피"), ("KOSDAQ", "코스닥")):
+        page, total = 1, None
+        while total is None or (page - 1) * 100 < total:
+            r = requests.get(f"https://m.stock.naver.com/api/stocks/marketValue/{mkt}",
+                             params={"page": page, "pageSize": 100}, headers=UA_HEADERS, timeout=20)
+            r.raise_for_status()
+            d = r.json()
+            total = int(d.get("totalCount") or 0)
+            stocks = d.get("stocks") or []
+            if not stocks:
+                break
+            for s in stocks:
+                if s.get("stockEndType") != "stock":
+                    continue                       # ETF·ETN 제외(KRX 주식 일별시세와 같은 범위)
+                if not str(s.get("localTradedAt", "")).startswith(stamp):
+                    continue
+                ratio = _num(s.get("fluctuationsRatio"))
+                if (s.get("compareToPreviousPrice") or {}).get("name") in ("FALLING", "LOWER_LIMIT") and ratio > 0:
+                    ratio = -ratio
+                value = _hangeul_won(s.get("accumulatedTradingValueKrwHangeul"))
+                if value is None:
+                    value = _num(s.get("accumulatedTradingValue")) * 1e6   # 백만원 단위
+                rows.append({"ISU_CD": s.get("itemCode", ""), "ISU_NM": s.get("stockName", ""),
+                             "TDD_CLSPRC": str(s.get("closePrice", "0")), "FLUC_RT": f"{ratio}",
+                             "ACC_TRDVOL": str(s.get("accumulatedTradingVolume", "0")).replace("-", "0"),
+                             "ACC_TRDVAL": f"{value:.0f}", "TDD_HGPRC": "1", "_mkt": label})
+            page += 1
+            time.sleep(0.15)
+    if len(rows) < 1500:
+        raise RuntimeError(f"네이버 {day} 전 종목 시세가 {len(rows)}개뿐 — 장 마감 전이거나 기준일 불일치")
+    return rows
 
 
 def volume_history(base_dd: str, days: int = 20) -> dict[str, list[float]]:
@@ -395,40 +449,9 @@ def check_pykrx_release(state: dict) -> str | None:
 
 # ─── 조립 ──────────────────────────────────────────────────────────────────────
 
-def main() -> None:
-    if not KRX_AUTH_KEY:
-        raise SystemExit("KRX_AUTH_KEY 환경변수가 필요합니다")
-    watch = effective_watchlist()  # 시드 + 텔레그램 /추가·/삭제 반영본
-    state = load_state(STATE_FILE, {})
-
-    # 새 기준일 데이터가 아직 안 올라온 시각이면 5분 간격으로 잠시 기다린다
-    # (아침 슬롯이 KRX OpenAPI 게시보다 먼저 시작해도 놓치지 않게)
-    wait_tries = int(os.environ.get("DATA_WAIT_TRIES", "6"))
-    # 10/12: 10/9 휴장 뒤 월요일 아침에 KRX OpenAPI가 아직 10/7까지만 올려 둔 상태라 '10/7 마감 스캔'이 나갔다
-    # (수급은 네이버라 10/8). 네이버 일별 시세의 최근 거래일을 '있어야 할 기준일'로 삼고, KRX가 그보다 옛날이면
-    # 아직 게시 전으로 보고 기다린다. 끝까지 안 올라오면 옛 날짜로 보내지 않고 다음 슬롯(08:30 백업)에 맡긴다.
-    expected = latest_trading_day()
-    base_dd, rows = None, None
-    for attempt in range(wait_tries):
-        base_dd, rows = find_base_date()
-        fresh = base_dd and (not expected or base_dd >= expected)
-        if fresh and (state.get("last_scanned") != base_dd or os.environ.get("FORCE_RESCAN")):
-            break
-        print(f"새 기준일 데이터 대기 ({attempt + 1}/{wait_tries}) — 5분 후 재확인"
-              f" (현재 최신: {base_dd or '없음'}, 있어야 할 기준일: {expected or '미확인'})")
-        time.sleep(300)
-    if not base_dd:
-        print("최근 거래일 데이터를 찾지 못함 — 종료")
-        return
-    if expected and base_dd < expected and not os.environ.get("FORCE_RESCAN"):
-        print(f"KRX 최신 {base_dd} < 최근 거래일 {expected} — 아직 게시 전, 옛 날짜로 보내지 않고 종료(다음 슬롯에서 재시도)")
-        return
-    last = state.get("last_scanned") or ""
-    if last >= base_dd and not os.environ.get("FORCE_RESCAN"):
-        print(f"{base_dd} 이미 스캔함(마지막 {last}) — 종료")
-        return
-    print(f"기준일 {base_dd} · 종목 {len(rows)}개")
-
+def build_report(base_dd: str, rows: list[dict], watch: dict[str, str], state: dict) -> tuple[str, bool]:
+    """마감 스캔 본문과 52주 계산 성공 여부. 아침 정식(KRX)·저녁 예비본(네이버)이 같은 함수를 쓴다."""
+    ok_52w = True
     sections: list[str] = []
     head_date = f"{base_dd[:4]}-{base_dd[4:6]}-{base_dd[6:]}"
     sections.append(f"📊 <b>마감 스캔</b> · {head_date}")
@@ -441,6 +464,7 @@ def main() -> None:
         sections.append("\n🧊 <b>52주 신저가</b> (거래량 2배↑)\n"
                         + ("\n".join(lows) if lows else " • 해당 없음"))
     except Exception as e:
+        ok_52w = False
         sections.append(f"\n⚠️ 52주 스캔 실패: {type(e).__name__}: {str(e)[:100]}")
 
     try:
@@ -478,7 +502,103 @@ def main() -> None:
     except Exception:
         pass
 
-    msg = "\n".join(sections)
+    return "\n".join(sections), ok_52w
+
+
+PREPARED_NOTE = "🗂 <i>예비본 — 아침에 거래소(KRX) 자료가 제때 안 와서, 전날 저녁 네이버 확정 시세(거래소와 같은 값)로 미리 만든 스캔을 보냅니다</i>"
+
+
+def prepare(watch: dict[str, str], state: dict) -> None:
+    """저녁 예비본: 오늘 장 마감 자료로 스캔을 만들어 상태에 저장만 한다(발송 없음)."""
+    today = now_kst().strftime("%Y%m%d")
+    day = latest_trading_day(include_today=True)
+    if day != today:
+        print(f"오늘({today}) 휴장 또는 네이버 미반영(최근 {day}) — 예비본 없음")
+        return
+    rows = naver_daily_rows(day)
+    print(f"예비본 기준일 {day} · 네이버 종목 {len(rows)}개")
+    msg, ok_52w = build_report(day, rows, watch, state)
+    if not ok_52w:
+        print("예비본 52주 계산 실패 — 저장하지 않음")
+        return
+    if os.environ.get("DRY_RUN"):
+        print("DRY_RUN — 예비본 저장 생략. 미리보기:\n" + msg)
+        return
+    state["prepared"] = {"base": day, "text": msg, "made_at": now_kst().isoformat(timespec="minutes")}
+    save_state(STATE_FILE, state)
+    print(f"예비본 저장 ({day}) — 아침 정식 스캔이 실패할 때만 발송")
+
+
+def send_prepared(state: dict, expected: str | None, why: str) -> bool:
+    """아침 정식 스캔이 안 될 때 저장해 둔 예비본을 보낸다. 기준일이 맞고 아직 안 보낸 것만."""
+    prep = state.get("prepared") or {}
+    base = prep.get("base") or ""
+    if not base or (expected and base != expected) or (state.get("last_scanned") or "") >= base:
+        print(f"예비본 없음/불일치(예비본 {base or '없음'}, 있어야 할 기준일 {expected or '미확인'}) — {why}")
+        return False
+    head, _, rest = prep["text"].partition("\n")
+    text = head + "\n" + PREPARED_NOTE + "\n" + rest
+    if os.environ.get("DRY_RUN"):
+        print(f"DRY_RUN — 예비본 발송 생략({why}):\n" + text)
+        return True
+    tg_send_long(text)
+    state["last_scanned"] = base
+    save_state(STATE_FILE, state)
+    print(f"예비본 발송 ({base}) — {why}")
+    return True
+
+
+def main() -> None:
+    if not KRX_AUTH_KEY:
+        raise SystemExit("KRX_AUTH_KEY 환경변수가 필요합니다")
+    watch = effective_watchlist()  # 시드 + 텔레그램 /추가·/삭제 반영본
+    state = load_state(STATE_FILE, {})
+
+    if os.environ.get("SCAN_MODE") == "prepare":
+        prepare(watch, state)
+        return
+
+    # 새 기준일 데이터가 아직 안 올라온 시각이면 5분 간격으로 잠시 기다린다
+    # (아침 슬롯이 KRX OpenAPI 게시보다 먼저 시작해도 놓치지 않게)
+    wait_tries = int(os.environ.get("DATA_WAIT_TRIES", "6"))
+    # 10/12: 아침에 KRX가 10/8 자료를 순간 빈 값으로 돌려줘 봇이 10/7로 건너뛰어 재발송했다. 네이버 일별 시세의
+    # 최근 거래일을 '있어야 할 기준일'로 삼고, KRX가 그보다 옛날이면 게시 전으로 보고 기다린다.
+    # 전날 저녁 예비본이 있으면 PREPARED_FALLBACK_HHMM(기본 08:20)까지만 기다리고 예비본을 보낸다.
+    expected = latest_trading_day()
+    prep_ready = bool(expected) and (state.get("prepared") or {}).get("base") == expected
+    fallback_at = os.environ.get("PREPARED_FALLBACK_HHMM", "0820")
+    force = bool(os.environ.get("FORCE_RESCAN"))
+    base_dd, rows = None, None
+    for attempt in range(wait_tries):
+        last = state.get("last_scanned") or ""
+        if expected and last >= expected and not force:
+            break                                   # 이미 보낸 기준일 — 기다릴 이유 없음
+        base_dd, rows = find_base_date()
+        fresh = base_dd and (not expected or base_dd >= expected)
+        if fresh and (last < base_dd or force):
+            break
+        if prep_ready and now_kst().strftime("%H%M") >= fallback_at:
+            break
+        print(f"새 기준일 데이터 대기 ({attempt + 1}/{wait_tries}) — 5분 후 재확인"
+              f" (현재 최신: {base_dd or '없음'}, 있어야 할 기준일: {expected or '미확인'})")
+        time.sleep(300)
+    last = state.get("last_scanned") or ""
+    if expected and last >= expected and not force:
+        print(f"{expected} 이미 스캔함(마지막 {last}) — 종료")
+        return
+    if not base_dd or (expected and base_dd < expected and not force):
+        why = f"KRX 최신 {base_dd or '없음'} < 최근 거래일 {expected}"
+        if not send_prepared(state, expected, why):
+            print(f"{why} — 옛 날짜로 보내지 않고 종료(다음 슬롯에서 재시도)")
+        return
+    if last >= base_dd and not force:
+        print(f"{base_dd} 이미 스캔함(마지막 {last}) — 종료")
+        return
+    print(f"기준일 {base_dd} · 종목 {len(rows)}개")
+
+    msg, ok_52w = build_report(base_dd, rows, watch, state)
+    if not ok_52w and send_prepared(state, base_dd, "KRX 자료로 52주 계산 실패"):
+        return
     if os.environ.get("DRY_RUN"):
         print("DRY_RUN — 텔레그램 발송·상태 저장 생략. 메시지 미리보기:\n" + msg)
         return
