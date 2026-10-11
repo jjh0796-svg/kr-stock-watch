@@ -84,6 +84,11 @@ jobs:
           restore-keys: |
             scan-state-
 
+      # 2026-10-12: 아래 DART 캐시 덮어쓰기가 스캔 상태(daily_scan.json — 마지막 발송 기준일·저녁 예비본)를
+      # 옛 사본으로 덮지 못하게 따로 빼 두었다가 되돌린다.
+      - name: Keep scan state aside
+        run: mkdir -p "$RUNNER_TEMP/scan" && cp .state/daily_scan.json "$RUNNER_TEMP/scan/" 2>/dev/null || true
+
       # 텔레그램 /추가·/삭제가 반영된 watch_config.json은 DART 워처의 캐시에 있다.
       # 나중에 복원해야 스캔 캐시에 섞여 있던 옛 사본을 덮어쓴다(최신 우선).
       - name: Restore watch config from DART watch state
@@ -93,6 +98,12 @@ jobs:
           key: dart-config-${{ github.run_id }}
           restore-keys: |
             dart-state-
+
+      - name: Put scan state back
+        run: |
+          if [ -f "$RUNNER_TEMP/scan/daily_scan.json" ]; then
+            mkdir -p .state && cp "$RUNNER_TEMP/scan/daily_scan.json" .state/daily_scan.json
+          fi
 
       - name: Run daily scan
         env:

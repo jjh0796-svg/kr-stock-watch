@@ -78,6 +78,25 @@ def test_prepare_mode_saves_without_sending():
     assert state["last_scanned"] == "20261007"
 
 
+def test_prepare_does_not_consume_pykrx_notice():
+    # 예비본을 만들 때 pykrx '본 버전'을 실제 상태에 적으면 아침 정식 스캔의 배포 안내가 사라진다
+    state = {"last_scanned": "20261007", "pykrx_seen_version": "1.0"}
+
+    def report(base, rows, watch, st):
+        st["pykrx_seen_version"] = "2.0"
+        return "📊 h\n본문", True
+    with patch.object(d, "naver_daily_rows", return_value=[{}] * 2000), \
+         patch.object(d, "KRX_AUTH_KEY", "x"), patch.object(d, "effective_watchlist", return_value={}), \
+         patch.object(d, "load_state", return_value=state), patch.object(d, "save_state"), \
+         patch.object(d, "latest_trading_day", return_value="20261012"), \
+         patch.object(d, "build_report", side_effect=report), \
+         patch.object(d, "now_kst", return_value=datetime(2026, 10, 12, 19, 50, tzinfo=KST)), \
+         patch.dict(d.os.environ, {"SCAN_MODE": "prepare"}):
+        d.os.environ.pop("DRY_RUN", None)
+        d.main()
+    assert state["pykrx_seen_version"] == "1.0" and state["prepared"]["base"] == "20261012"
+
+
 def test_prepare_mode_skips_holiday():
     state = {}
     with patch.object(d, "naver_daily_rows") as rows:

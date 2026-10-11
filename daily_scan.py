@@ -9,6 +9,7 @@
 #   08:40 백업 슬롯은 본 실행 실패 시에만 동작(기준일 중복실행 방지 상태 보관).
 #   + 투자자별 순매수 상위(코스피/코스닥 × 외인/기관 톱3, 수량×종가 근사)
 # ==========================================
+import json
 import os
 import re
 import time
@@ -517,7 +518,9 @@ def prepare(watch: dict[str, str], state: dict) -> None:
         return
     rows = naver_daily_rows(day)
     print(f"예비본 기준일 {day} · 네이버 종목 {len(rows)}개")
-    msg, ok_52w = build_report(day, rows, watch, state)
+    # 상태 복사본으로 만든다 — build_report 안의 pykrx 배포 감시가 '본 버전'을 상태에 적는데, 예비본(대개 안 보냄)이
+    # 먼저 적어 버리면 아침 정식 스캔에서 그 안내가 사라진다. 실제 상태엔 prepared만 더한다.
+    msg, ok_52w = build_report(day, rows, watch, json.loads(json.dumps(state)))
     if not ok_52w:
         print("예비본 52주 계산 실패 — 저장하지 않음")
         return
