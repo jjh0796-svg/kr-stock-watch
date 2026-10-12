@@ -135,9 +135,11 @@ def naver_daily_rows(day: str) -> list[dict]:
                 ratio = _num(s.get("fluctuationsRatio"))
                 if (s.get("compareToPreviousPrice") or {}).get("name") in ("FALLING", "LOWER_LIMIT") and ratio > 0:
                     ratio = -ratio
-                value = _hangeul_won(s.get("accumulatedTradingValueKrwHangeul"))
-                if value is None:
-                    value = _num(s.get("accumulatedTradingValue")) * 1e6   # 백만원 단위
+                # accumulatedTradingValue는 백만원 단위(10/12 장중 한글 표기와 대조: 276,846 ↔ 2,768억원).
+                # 한글 표기는 억 단위 반올림이라 덜 정확 — 숫자가 없을 때만 쓴다.
+                value = _num(s.get("accumulatedTradingValue")) * 1e6
+                if not value:
+                    value = _hangeul_won(s.get("accumulatedTradingValueKrwHangeul")) or 0.0
                 rows.append({"ISU_CD": s.get("itemCode", ""), "ISU_NM": s.get("stockName", ""),
                              "TDD_CLSPRC": str(s.get("closePrice", "0")), "FLUC_RT": f"{ratio}",
                              "ACC_TRDVOL": str(s.get("accumulatedTradingVolume", "0")).replace("-", "0"),
