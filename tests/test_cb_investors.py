@@ -2,11 +2,12 @@ from pathlib import Path
 import re
 from issue_terms import summarize_xml, fund_investors, Fields
 from cb_investors import fund_map
+from richflat import flatten
 
 FIXTURES=Path(__file__).parent/'fixtures'
 
 def render(receipt):
-    return summarize_xml((FIXTURES/(receipt+'.xml')).read_text(encoding='utf-8'),'주요사항보고서(전환사채권발행결정)')
+    return flatten(summarize_xml((FIXTURES/(receipt+'.xml')).read_text(encoding='utf-8'),'주요사항보고서(전환사채권발행결정)'))
 
 def test_atlas_real_funds_and_direct_subscribers():
     text=render('20260921000354')
@@ -30,14 +31,14 @@ def tables(rows):
 def test_partial_mapping_keeps_good_fund_and_direct_investor():
     raw=tables([['펀드 1','실제 A펀드','A운용','X증권']])
     f={'ISSU_NM':['X증권(“본건 펀드1”의 신탁업자 지위에서)','Y증권(본건 펀드2의 신탁업자 지위에서)','직접법인'],'ISSU_AMT':['100000000','200000000','300000000']}
-    text='\n'.join(fund_investors(raw,f,'600000000'))
+    text=flatten('\n'.join(fund_investors(raw,f,'600000000')))
     assert 'A운용 1.0억원' in text and '직접법인 3.0억원' in text
     assert '본건 펀드 2 · 2.0억원 (운용사·배정 연결 미확인)' in text
     assert 'Y증권 2.0억원' not in text
 
 def test_cross_manager_pool_not_split_or_double_counted():
     raw=tables([['본건 펀드 1','A펀드','A운용','X'],['본건 펀드 2','B펀드','B운용','Y']])
-    text='\n'.join(fund_investors(raw,{'ISSU_NM':['X(본건 펀드 1, 2의 신탁업자 지위에서)'],'ISSU_AMT':['100000000']},'100000000'))
+    text=flatten('\n'.join(fund_investors(raw,{'ISSU_NM':['X(본건 펀드 1, 2의 신탁업자 지위에서)'],'ISSU_AMT':['100000000']},'100000000')))
     assert '운용사별 배분 미공개' in text
     assert 'A운용 1.0억원' not in text and 'B운용 1.0억원' not in text
     assert 'A펀드 / B펀드 · 1.0억원' in text
@@ -45,7 +46,7 @@ def test_cross_manager_pool_not_split_or_double_counted():
 def test_header_columns_and_escaping():
     raw='<TABLE><TR><TD>구분</TD><TD>신탁업자</TD><TD>집합투자업자</TD><TD>집합투자기구</TD></TR><TR><TD>펀드1</TD><TD>TRUSTEE</TD><TD>A &amp; B운용</TD><TD>성장펀드</TD></TR></TABLE>'
     assert fund_map(raw)=={1:('성장펀드','A & B운용')}
-    text='\n'.join(fund_investors(raw,{'ISSU_NM':['TRUSTEE(본건 펀드 1의 신탁업자 지위에서)'],'ISSU_AMT':['100000000']},'100000000'))
+    text=flatten('\n'.join(fund_investors(raw,{'ISSU_NM':['TRUSTEE(본건 펀드 1의 신탁업자 지위에서)'],'ISSU_AMT':['100000000']},'100000000')))
     assert 'A &amp; B운용' in text and 'TRUSTEE' not in text
 
 def test_conflicting_fund_definition_not_guessed():
@@ -77,5 +78,5 @@ def test_fund_brand():
 
 def test_manager_column_missing_still_keeps_fund_name_when_brand_unknown():
     raw='<TABLE><TR><TD>구분</TD><TD>집합투자기구</TD></TR><TR><TD>본건 펀드 1</TD><TD>일반사모투자신탁 1호</TD></TR></TABLE>'
-    text='\n'.join(fund_investors(raw,{'ISSU_NM':['X증권(본건 펀드1의 신탁업자 지위에서)'],'ISSU_AMT':['100000000']},'100000000'))
+    text=flatten('\n'.join(fund_investors(raw,{'ISSU_NM':['X증권(본건 펀드1의 신탁업자 지위에서)'],'ISSU_AMT':['100000000']},'100000000')))
     assert '일반사모투자신탁 1호 · 1.0억원 (운용사 미기재)' in text

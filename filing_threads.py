@@ -41,7 +41,8 @@ def send_filing(state,item,text,sender,save,token,chat,*,parse_mode='HTML',dry_r
     parent=max(candidates,key=lambda x:x['seq'])['message_id'] if candidates else current.get('message_id')
     digest=hashlib.sha256((receipt+'|'+text).encode()).hexdigest()
     # Long HTML is converted to plain text before splitting; no broken tags.
-    if len(text.encode('utf-16-le'))//2>3800:
+    # 리치 메시지(parse_mode='RICH')는 32,768자까지 한 통이라 나누지 않는다 (10/16).
+    if parse_mode!='RICH' and len(text.encode('utf-16-le'))//2>3800:
         text=html.unescape(re.sub('<[^>]+>','',text));parse_mode=None
         chunks=[text[i:i+1800] for i in range(0,len(text),1800)]
     else:chunks=[text]

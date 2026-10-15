@@ -99,8 +99,9 @@ ROLE_MANAGER, ROLE_BRAND, ROLE_GP = '운용사', '펀드명 기준', '업무집�
 
 
 
-def format_investors(raw, fields, total):
-    from issue_terms import number, eok_amount
+def group_investors(raw, fields, total):
+    """투자자 표를 운용사별로 묶는다 → (groups, direct, unresolved, known, total_ok) — 텍스트/표 렌더러가 같이 쓴다."""
+    from issue_terms import number
     names = fields.get('ISSU_NM', []); amounts = fields.get('ISSU_AMT', [])
     if not names or len(names) != len(amounts):
         return None  # Never zip mismatched columns or silently truncate subscribers.
@@ -145,6 +146,17 @@ def format_investors(raw, fields, total):
         group = groups.setdefault((manager,role), {'amount':Decimal(0),'allocations':[]})
         group['amount'] += value
         group['allocations'].append((details,value))
+    total_ok = not any(number(v) is None for v in amounts) and known == number(total)
+    return groups, direct, unresolved, known, total_ok
+
+
+def format_investors(raw, fields, total):
+    """텍스트(줄) 버전 — 테스트·일반 메시지용."""
+    from issue_terms import eok_amount
+    grouped = group_investors(raw, fields, total)
+    if grouped is None:
+        return None
+    groups, direct, unresolved, known, total_ok = grouped
     lines = ['<b>투자자 · 운용사별 인수 예정액</b>']
     pooled = False; branded = False
     for (manager,role), group in sorted(groups.items(), key=lambda x:-x[1]['amount']):
@@ -175,13 +187,57 @@ def format_investors(raw, fields, total):
         lines.append('<b>운용사 합산 제외 · 연결 확인 필요</b>')
         for name,value,reason in unresolved:
             lines.append('• '+html.escape(name)+' · '+eok_amount(value)+' ('+reason+')')
-    if any(number(v) is None for v in amounts) or known != number(total):
-        lines.append('※ 배정액 합계와 발행금액 대조 미완료 · 합계 확인 필요')
-    else:
-        lines.append('배정 합계: '+eok_amount(known)+' (발행금액과 일치)')
-    if branded:
-        lines.append('※ 펀드명 기준 = 공시에 운용사 기재가 없어 펀드 이름 앞부분으로 묶음')
-    if pooled:
-        lines.append('※ 여러 펀드 묶음의 개별 배분액은 추정하지 않음')
-    lines.append('※ 해당 공시의 인수 예정액 · 운용사 자기자금 투자 또는 납입 완료를 뜻하지 않음')
+    lines.extend(_notes(known, total_ok, branded, pooled, eok_amount))
     return lines
+
+
+def _notes(known, total_ok, branded, pooled, eok_amount):
+    notes = []
+    if total_ok:
+        notes.append('배정 합계: '+eok_amount(known)+' (발행금액과 일치)')
+    else:
+        notes.append('※ 배정액 합계와 발행금액 대조 미완료 · 합계 확인 필요')
+    if branded:
+        notes.append('※ 펀드명 기준 = 공시에 운용사 기재가 없어 펀드 이름 앞부분으로 묶음')
+    if pooled:
+        notes.append('※ 여러 펀드 묶음의 개별 배분액은 추정하지 않음')
+    notes.append('※ 해당 공시의 인수 예정액 · 운용사 자기자금 투자 또는 납입 완료를 뜻하지 않음')
+    return notes
+
+
+def format_investors_rich(raw, fields, total):
+    """표 버전(텔레그램 리치 메시지, 10/16): 운용사별 합계 표 + 펀드 세부는 접기 블록. 긴 명단이 화면을 덮지 않는다."""
+    from issue_terms import eok_amount
+    grouped = group_investors(raw, fields, total)
+    if grouped is None:
+        return None
+    groups, direct, unresolved, known, total_ok = grouped
+    pooled = False; branded = False
+    rows = []; detail_lines = []
+    for (manager,role), group in sorted(groups.items(), key=lambda x:-x[1]['amount']):
+        allocations = group['allocations']
+        count = sum(len(d) for d,_ in allocations)
+        tag = {ROLE_BRAND: '펀드명 기준', ROLE_GP: '업무집행조합원'}.get(role, '운용사')
+        branded = branded or role == ROLE_BRAND
+        rows.append((html.escape(manager), eok_amount(group['amount']), str(count), tag))
+        if role == ROLE_BRAND:
+            continue
+        for details,value in allocations:
+            if len(details)==1:
+                detail_lines.append(html.escape(manager)+' · '+html.escape(details[0])+' · '+eok_amount(value))
+            else:
+                pooled=True
+                detail_lines.append(html.escape(manager)+' · 묶음 배정 '+eok_amount(value)+' — '+' / '.join(html.escape(n) for n in details))
+    for name,value in direct:
+        rows.append((html.escape(name), eok_amount(value), '-', '직접·조합'))
+    for name,value,reason in unresolved:
+        rows.append((html.escape(name), eok_amount(value), '-', reason))
+    table = ['<table>', '<tr><th>투자자·운용사</th><th>인수 예정액</th><th>펀드</th><th>구분</th></tr>']
+    table += [f'<tr><td>{a}</td><td>{b}</td><td>{c}</td><td>{d}</td></tr>' for a,b,c,d in rows]
+    table.append('</table>')
+    out = ['<b>투자자 · 운용사별 인수 예정액</b>', ''.join(table)]
+    if detail_lines:
+        out.append('<details><summary>펀드별 배정 세부 ('+str(len(detail_lines))+'건) 펼치기</summary>'
+                   + '\n'.join(detail_lines) + '</details>')
+    out.extend(_notes(known, total_ok, branded, pooled, eok_amount))
+    return out

@@ -1,3 +1,4 @@
+from richflat import flatten
 import html,re
 from decimal import Decimal
 from pathlib import Path
@@ -16,7 +17,7 @@ def test_rounding_and_no_won_duplicate():
 
 def test_actual_fund_managers_and_premium():
     raw=(ROOT/'20260916000208.xml').read_text(encoding='utf-8')
-    text=summarize_xml(raw,'전환사채권발행결정')
+    text=flatten(summarize_xml(raw,'전환사채권발행결정'))
     for value in ['아트만자산운용 70.0억원','에스피자산운용 50.0억원','휴먼앤드브릿지자산운용 5.0억원','HNB 코스닥벤처 일반 사모투자신탁 제4호','30.0% 할증','리픽싱 없음','한도 50%']:
         assert value in text
     assert '한국투자증권' not in text

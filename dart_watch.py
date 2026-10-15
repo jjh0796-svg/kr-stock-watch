@@ -24,8 +24,8 @@ from datetime import timedelta
 
 import requests
 
-from common import (DRY_RUN, UA_HEADERS, esc, load_state, load_watch_config,
-                    load_watchlist, now_kst, save_state, save_watch_config, tg_send)
+from common import (DRY_RUN, RICH, UA_HEADERS, esc, load_state, load_watch_config,
+                    load_watchlist, now_kst, rich_payload, save_state, save_watch_config, tg_send)
 from summarize import company_card, issuance_quick, stock_snapshot, summarize, summarizable
 from filing_threads import send_filing
 from issue_terms import needs_retry
@@ -564,10 +564,16 @@ def classify(item: dict, watch: dict[str, str], cfg: dict) -> str | None:
     return None
 
 
+def is_rich(text):
+    """표·접기 블록이 든 카드는 리치 메시지로 보낸다(일반 sendMessage는 <table>·<details>를 못 그린다)."""
+    return bool(text) and ('<table' in text or '<details' in text)
+
+
 def send_disclosure(state,item,text):
     token=os.environ.get('TELEGRAM_BOT_TOKEN','');chat=os.environ.get('TELEGRAM_CHAT_ID','')
     dates=dates_from_summary(text) if ISSUE_RE.search(re.sub(r'\s+','',item.get('report_nm',''))) else None
-    if DRY_RUN:return send_filing(state,item,text,tg_send,lambda s:None,token,chat,dry_run=True)
+    mode=RICH if is_rich(text) else 'HTML'
+    if DRY_RUN:return send_filing(state,item,text,tg_send,lambda s:None,token,chat,parse_mode=mode,dry_run=True)
     scope=scope_for(token,chat);ref=prepare_buttons(state,scope,item,dates)
     save_state(STATE_FILE,state)
     def sender(body,**kwargs):
@@ -575,7 +581,7 @@ def send_disclosure(state,item,text):
         if kwargs.get('reply_markup') and type(result) is int:
             register_message(state,scope,ref,result);save_state(STATE_FILE,state)
         return result
-    return send_filing(state,item,text,sender,lambda s:save_state(STATE_FILE,s),token,chat,
+    return send_filing(state,item,text,sender,lambda s:save_state(STATE_FILE,s),token,chat,parse_mode=mode,
                        followup_dates=dates,reply_markup=keyboard(state,scope,ref))
 
 def check_followups(api_key,state,cfg=None):
@@ -600,8 +606,12 @@ def edit_existing_disclosure(state,item,text=None):
     payload={'chat_id':chat,'message_id':mid,'reply_markup':keyboard(state,scope,ref)}
     method='editMessageReplyMarkup'
     if text:
-        if len(text.encode('utf-16-le'))//2>3800:return False
-        method='editMessageText';payload.update(text=text,parse_mode='HTML',disable_web_page_preview=True)
+        if is_rich(text):
+            # 표·접기 블록이 든 완성 카드는 리치 메시지로 고쳐 쓴다(10/16). 1차 카드가 일반 메시지였어도 편집은 된다(봇운영실 192 시험).
+            method='editMessageText';payload.update(rich_payload(text))
+        else:
+            if len(text.encode('utf-16-le'))//2>3800:return False
+            method='editMessageText';payload.update(text=text,parse_mode='HTML',disable_web_page_preview=True)
     try:
         data=requests.post(f'https://api.telegram.org/bot{token}/{method}',json=payload,timeout=(10,25)).json()
         okay=data.get('ok') or 'message is not modified' in data.get('description','').lower()

@@ -112,8 +112,8 @@ def eok_amount(value):
 
 
 def fund_investors(raw,fields,total):
-    from cb_investors import format_investors
-    return format_investors(raw,fields,total)
+    from cb_investors import format_investors_rich
+    return format_investors_rich(raw,fields,total)   # 10/16 텔레그램 리치 메시지: 운용사별 표 + 펀드 세부 접기
 
 
 def conversion_premium(text):
@@ -177,11 +177,14 @@ def summarize_xml(raw,title):
         lines.append('')
         minimum=get('MIN_PRC')
         adjustment=get('EXE_REG')
+        clauses=[]
         if re.search(r'시가의\s*상승\s*및\s*하락에\s*따른\s*조정은\s*없',adjustment):
-            lines.append('가격조정: 시가 변동에 따른 리픽싱 없음 (증자·분할 등 조정 별도)')
-        elif minimum:lines.append(f'가격조정 최저가: {show(minimum,"원")}')
-        elif adjustment:lines.append('가격조정: 조항 있음 · 세부 조건 원문 참고')
-        lines.extend(option_lines(get('OPT_FCT')))
+            clauses.append('가격조정: 시가 변동에 따른 리픽싱 없음 (증자·분할 등 조정 별도)')
+        elif minimum:clauses.append(f'가격조정 최저가: {show(minimum,"원")}')
+        elif adjustment:clauses.append('가격조정: 조항 있음 · 세부 조건 원문 참고')
+        clauses.extend(option_lines(get('OPT_FCT')))
+        # 10/16 리치 메시지: 조정·풋·콜 조항은 접기 블록으로(기본 접힘) — 카드 길이를 줄이고 필요할 때만 편다
+        lines.append('<details><summary>가격조정·풋·콜 조항 ('+str(len(clauses))+') 펼치기</summary>'+'\n'.join(clauses)+'</details>')
 
     else:
         total=sum((n for _,n in purposes),Decimal(0))

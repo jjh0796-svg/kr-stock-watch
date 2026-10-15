@@ -38,6 +38,19 @@ def esc(s: str) -> str:
 # 주의: 읽기 타임아웃은 "서버 도착 후 응답만 유실"로 간주하고 재시도하지 않는다.
 # (재시도했다가 같은 메시지가 12통 도착한 사고 이력 있음 — 연결 실패만 재시도)
 
+RICH = 'RICH'              # parse_mode 값: 텔레그램 리치 메시지(표·접기 블록, 32,768자)로 보낸다 — Bot API 10.1+ (2026-10-16)
+RICH_LINEBREAK = os.environ.get('RICH_LINEBREAK', '<br>')   # 리치 HTML에서 줄바꿈 표현(봇운영실 194~196 시험 뒤 확정)
+
+
+def rich_html(text: str) -> str:
+    """줄 단위로 만든 HTML 카드를 리치 메시지 HTML로: 줄바꿈을 RICH_LINEBREAK로, 표·접기 블록은 그대로."""
+    return text.replace('\n', RICH_LINEBREAK)
+
+
+def rich_payload(text: str) -> dict:
+    return {'rich_message': {'html': rich_html(text)}}
+
+
 def tg_send(text: str, *, parse_mode='HTML', reply_to_message_id=None, reply_markup=None) -> int | bool:
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
@@ -46,13 +59,17 @@ def tg_send(text: str, *, parse_mode='HTML', reply_to_message_id=None, reply_mar
         print(f"[TG:{reason}] {text[:3900]}")
         return bool(DRY_RUN)
 
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": text,
-        "disable_web_page_preview": True,
-    }
-    if parse_mode:payload['parse_mode']=parse_mode
+    if parse_mode == RICH:
+        url = f"https://api.telegram.org/bot{token}/sendRichMessage"
+        payload = {"chat_id": chat_id, **rich_payload(text)}
+    else:
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        payload = {
+            "chat_id": chat_id,
+            "text": text,
+            "disable_web_page_preview": True,
+        }
+        if parse_mode:payload['parse_mode']=parse_mode
     if reply_markup is not None:payload['reply_markup']=reply_markup
     if reply_to_message_id is not None:
         payload['reply_parameters']={'message_id':reply_to_message_id,'allow_sending_without_reply':True}
