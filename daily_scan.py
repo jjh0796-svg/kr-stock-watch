@@ -549,6 +549,7 @@ def prepare(watch: dict[str, str], state: dict) -> None:
     state["prepared"] = {"base": day, "text": msg, "made_at": now_kst().isoformat(timespec="minutes")}
     save_state(STATE_FILE, state)
     print(f"예비본 저장 ({day}) — 아침 정식 스캔이 실패할 때만 발송")
+    print("예비본 내용(다음 날 정식 스캔과 대조용):\n" + msg)
 
 
 def send_prepared(state: dict, expected: str | None, why: str) -> bool:
