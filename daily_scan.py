@@ -512,13 +512,30 @@ PREPARED_NOTE = "🗂 <i>예비본 — 아침에 거래소(KRX) 자료가 제때
 
 
 def prepare(watch: dict[str, str], state: dict) -> None:
-    """저녁 예비본: 오늘 장 마감 자료로 스캔을 만들어 상태에 저장만 한다(발송 없음)."""
-    today = now_kst().strftime("%Y%m%d")
-    day = latest_trading_day(include_today=True)
-    if day != today:
-        print(f"오늘({today}) 휴장 또는 네이버 미반영(최근 {day}) — 예비본 없음")
+    """저녁 예비본: 최근 거래일 장 마감 자료로 스캔을 만들어 상태에 저장만 한다(발송 없음).
+
+    10/15: GitHub 예약 실행이 19:30 → 실제 00:17~04:54로 5~9시간 늦게 돌아, '오늘이 거래일인가'만 보던 처음 버전은
+    날짜가 넘어간 뒤라 매번 '휴장'으로 건너뛰었다(예비본 0회). 이제 '최근 거래일'을 대상으로 하고, 네이버 전 종목 시세가
+    아직 그날 값일 때(장 마감 뒤 ~ 다음 날 장 시작 전 초기화 전)만 만든다. 장중(08:00~16:30)엔 장중 값이라 만들지 않는다."""
+    hhmm = now_kst().strftime("%H%M")
+    if "0800" <= hhmm < "1630":
+        print(f"{hhmm} 장중·장 시작 전 초기화 시간대 — 네이버 시세가 확정치가 아니라 예비본을 만들지 않음")
         return
-    rows = naver_daily_rows(day)
+    day = latest_trading_day(include_today=True)
+    if not day:
+        print("최근 거래일 확인 실패 — 예비본 없음")
+        return
+    if (state.get("prepared") or {}).get("base") == day:
+        print(f"{day} 예비본 이미 있음 — 건너뜀")
+        return
+    if (state.get("last_scanned") or "") >= day:
+        print(f"{day} 정식 스캔 이미 발송 — 예비본 불필요")
+        return
+    try:
+        rows = naver_daily_rows(day)
+    except Exception as e:
+        print(f"{day} 네이버 전 종목 시세를 못 읽음({type(e).__name__}: {str(e)[:120]}) — 예비본 없음")
+        return
     print(f"예비본 기준일 {day} · 네이버 종목 {len(rows)}개")
     # 상태 복사본으로 만든다 — build_report 안의 pykrx 배포 감시가 '본 버전'을 상태에 적는데, 예비본(대개 안 보냄)이
     # 먼저 적어 버리면 아침 정식 스캔에서 그 안내가 사라진다. 실제 상태엔 prepared만 더한다.

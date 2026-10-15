@@ -97,11 +97,34 @@ def test_prepare_does_not_consume_pykrx_notice():
     assert state["pykrx_seen_version"] == "1.0" and state["prepared"]["base"] == "20261012"
 
 
-def test_prepare_mode_skips_holiday():
-    state = {}
-    with patch.object(d, "naver_daily_rows") as rows:
-        sent, _, _ = run_main(state, krx=lambda: (None, None), expected="20261008", env={"SCAN_MODE": "prepare"})
-    rows.assert_not_called()
+def test_prepare_after_midnight_targets_latest_trading_day():
+    # 10/15: GitHub 예약이 19:30 → 00:17·02:41·04:54로 밀려 '오늘은 휴장'으로 건너뛰던 문제 — 새벽에도 직전 거래일로 만든다
+    state = {"last_scanned": "20261013"}
+    with patch.object(d, "naver_daily_rows", return_value=[{}] * 2000) as rows:
+        sent, _, _ = run_main(state, krx=lambda: (None, None), expected="20261014", now="0241",
+                              env={"SCAN_MODE": "prepare"})
+    rows.assert_called_once_with("20261014")
+    assert state["prepared"]["base"] == "20261014" and sent == []
+
+
+def test_prepare_skips_market_hours_and_done_days():
+    for now, state in (("1030", {"last_scanned": "20261013"}),                       # 장중 — 네이버가 장중 값
+                       ("2100", {"last_scanned": "20261014"}),                       # 정식 스캔 이미 발송
+                       ("2300", {"last_scanned": "20261013",
+                                 "prepared": {"base": "20261014", "text": "x"}})):   # 예비본 이미 있음
+        before = dict(state)
+        with patch.object(d, "naver_daily_rows") as rows:
+            sent, _, _ = run_main(state, krx=lambda: (None, None), expected="20261014", now=now,
+                                  env={"SCAN_MODE": "prepare"})
+        rows.assert_not_called()
+        assert sent == [] and state == before, now
+
+
+def test_prepare_tolerates_naver_failure():
+    state = {"last_scanned": "20261013"}
+    with patch.object(d, "naver_daily_rows", side_effect=RuntimeError("1200개뿐")):
+        sent, _, _ = run_main(state, krx=lambda: (None, None), expected="20261014", now="2000",
+                              env={"SCAN_MODE": "prepare"})
     assert "prepared" not in state and sent == []
 
 
