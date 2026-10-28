@@ -6,6 +6,7 @@
 # 요약은 "탐지되어 알림이 나가는 건"에만 호출된다 (건당 DART 1~2회 + 네이버 1회).
 # 실패하면 None을 돌려주고 알림은 요약 없이 그대로 나간다.
 # ==========================================
+import html
 import io
 import os
 import re
@@ -349,7 +350,10 @@ def _doc_text(api_key: str, rcept_no: str) -> str:
             except UnicodeDecodeError:
                 continue
     text = re.sub(r"<[^>]+>", " ", " ".join(texts))
-    return re.sub(r"\s+", " ", text)
+    # 10/28 우진아이엔에스 'HVAC&amp;소방공사': 원문의 &amp; 같은 문자 참조를 풀지 않으면
+    # 뒤에서 esc()가 한 번 더 이스케이프해 텔레그램에 '&amp;'가 그대로 보인다. 태그를 걷어낸 뒤에 푼다
+    # (먼저 풀면 &lt;…&gt;가 태그로 오인돼 지워진다). 이후 출력은 esc()로 정확히 한 번만 이스케이프.
+    return re.sub(r"\s+", " ", html.unescape(text))
 
 
 def _detect_unit_won(text: str) -> float:
@@ -706,7 +710,7 @@ def latest_close(code, now=None):
 def _sum_exercise(api_key: str, rcept_no: str, ctx: dict | None = None) -> str | None:
     from issue_terms import fetch_xml,TableRows
     raw=fetch_xml(api_key,rcept_no)
-    text=re.sub(r'\s+',' ',re.sub(r'<[^>]+>',' ',raw))
+    text=re.sub(r'\s+',' ',html.unescape(re.sub(r'<[^>]+>',' ',raw)))
     shares=_num((re.search(r'행사주식수\s*누계\s*\(주\)[^\d]*([\d,]+)',text) or [None,None])[1])
     pct=_num((re.search(r'발행주식총수\s*대비\s*\(%\)\s*([\d.,]+)',text) or [None,None])[1])
     if shares is None:return None
@@ -725,12 +729,12 @@ def _sum_exercise(api_key: str, rcept_no: str, ctx: dict | None = None) -> str |
     if len({price for _,price in prices})==1:
         lines.append(f'{label}: {prices[0][1]:,.0f}원')
     else:
-        lines.extend(f'{label}: {price:,.0f}원 ({seq}회차)' for seq,price in prices)
+        lines.extend(f'{label}: {price:,.0f}원 ({esc(seq)}회차)' for seq,price in prices)
     code=(ctx or {}).get('code')
     if code:lines.append(latest_close(code) or '최근 종가: 조회 불가')
     if entries:
         lines.append('')
-        lines.extend(f'청구 {date} · {seq}회차 · {qty:,.0f}주 · 상장예정 {listing}' for date,seq,price,qty,listing in entries)
+        lines.extend(f'청구 {esc(date)} · {esc(seq)}회차 · {qty:,.0f}주 · 상장예정 {esc(listing)}' for date,seq,price,qty,listing in entries)
     rem=re.search(r'잔액.{0,200}?([\d,]{7,})\s*KRW[^0-9]*([\d,]{7,})\s*KRW[^0-9]*([\d,]+)\s+([\d,]+)',text)
     if rem:
         remaining,convertible=_num(rem.group(2)),_num(rem.group(4))
@@ -954,13 +958,13 @@ def _quick_bond_card(row: dict, kind: str) -> str:
         for k in keys:
             v = str(row.get(k) or "").strip()
             if v and v != "-":
-                return v
+                return esc(v)   # 구조화 API 문자열도 HTML로 나가므로 한 번 이스케이프 (10/28)
         return ""
 
     def g_end(suffix):  # BW·EB는 키 머리글자가 달라서(ex/bw…) 꼬리로 찾는다
         for k, v in row.items():
             if k.endswith(suffix) and str(v).strip() not in ("", "-"):
-                return str(v).strip()
+                return esc(str(v).strip())
         return ""
 
     lines = ["<b>발행조건 · 접수 직후 1차(구조화 공시 기준)</b>",
@@ -971,7 +975,7 @@ def _quick_bond_card(row: dict, kind: str) -> str:
         lines.append(f"{label}가액: {prc}원")
     stk, cnt = g_end("stk_knd"), g_end("stk_cnt")
     if stk or cnt:
-        lines.append(f"{label}대상: {esc(stk or '-')} · {cnt or '-'}주")
+        lines.append(f"{label}대상: {stk or '-'} · {cnt or '-'}주")
     if g_end("tisstk_vs"):
         lines.append(f"주식총수 대비: {g_end('tisstk_vs')}% (공시 기재 기준)")
     if g("bd_intr_ex") or g("bd_intr_sf"):

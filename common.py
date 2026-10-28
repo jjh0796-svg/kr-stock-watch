@@ -31,7 +31,10 @@ def now_kst() -> datetime:
 
 
 def esc(s: str) -> str:
-    return html.escape(str(s or ""), quote=False)
+    """텔레그램 HTML용 이스케이프 — 몇 번을 거쳐도 결과는 '정확히 한 번 이스케이프'.
+    DART 원문·API 값에 이미 &amp; 같은 문자 참조가 섞여 오는 일이 있어(10/28 우진아이엔에스
+    'HVAC&amp;소방공사'가 화면에 '&amp;'로 보임) 먼저 풀고 나서 이스케이프한다."""
+    return html.escape(html.unescape(str(s or "")), quote=False)
 
 
 # ─── 텔레그램 ──────────────────────────────────────────────────────────────────

@@ -507,8 +507,25 @@ def fetch_today_list(api_key: str, first_run: bool, seen: dict) -> list[dict]:
     return items
 
 
+_TITLE_TAGS = re.compile(r"^\s*((?:\[[^\]]*\]\s*)+)")
+
+
+def attachment_only(title: str) -> bool:
+    """[첨부정정]·[첨부추가] 공시 — 첨부서류만 고치거나 더한 것이라 본문·발행조건은 그대로다.
+    10/27 애드바이오텍 [첨부정정] CB 2건(000381·000383)과 10/28 썬테크 [첨부정정] 유증이 새 카드로 나가
+    'DART 자료 파일이 안 열림' 요약 없음으로 끝났다(이 접수번호엔 본문이 없어 요약할 거리도 없다).
+    원래 공시 알림이 이미 나갔으므로 알리지 않는다. [기재정정]이 함께 붙으면 본문이 바뀐 것이라 알린다."""
+    m = _TITLE_TAGS.match(title or "")
+    if not m:
+        return False
+    tags = {t.replace(" ", "") for t in re.findall(r"\[([^\]]*)\]", m.group(1))}
+    return bool(tags & {"첨부정정", "첨부추가"}) and not any("기재정정" in t for t in tags)
+
+
 def classify(item: dict, watch: dict[str, str], cfg: dict) -> str | None:
     """공시 1건을 분류해 알림 메시지를 만들거나 None(무시)."""
+    if attachment_only(item.get("report_nm") or ""):
+        return None
     off = types_off(cfg)
     code = (item.get("stock_code") or "").strip()
     corp = item.get("corp_name") or ""
