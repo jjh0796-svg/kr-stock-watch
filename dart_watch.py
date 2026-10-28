@@ -657,13 +657,26 @@ def _summary_ready(item,summary):
     return not (ISSUE_RE.search(re.sub(r'\s+','',item.get('report_nm',''))) and needs_retry(summary))
 
 
+def reaction_note(item,summary):
+    """📊 과거 비슷한 공시의 주가 반응 한 줄 (2026-10-28 추가, 통계는 data/event_reaction_stats.json — 월 1회 갱신).
+    정정·자회사 공시와 코넥스·기타는 통계 대상이 아니라 붙이지 않는다. 실패해도 카드는 그대로 나간다."""
+    try:
+        from event_reaction_stats import attrs_from_card,classify_title,reaction_line
+        title=item.get('report_nm','');cls=item.get('corp_cls','')
+        kind=classify_title(title)
+        if not kind or kind['amended'] or kind['subsidiary'] or cls not in ('Y','K'):return None
+        return reaction_line(kind['type'],attrs_from_card(title,summary or '',cls))
+    except Exception as exc:
+        print('[반응 통계 생략]',type(exc).__name__,str(exc)[:120]);return None
+
+
 def _complete_card(item,base,summary):
     from disclosure_layout import space_summary
     summary=space_summary(item.get('report_nm',''),summary)
     head,_,link=base.rpartition('\n')
     snap=stock_snapshot(item.get('stock_code','')) if item.get('stock_code') else None
     body=head.rstrip()+'\n\n'+summary.strip()
-    footer='\n'.join(part for part in (snap,link) if part)
+    footer='\n'.join(part for part in (reaction_note(item,summary),snap,link) if part)
     return body+('\n\n'+footer if footer else '')
 
 
