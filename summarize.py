@@ -801,28 +801,74 @@ def _sum_dividend(api_key: str, rcept_no: str, ctx: dict | None = None) -> str |
     return "\n".join(lines) if lines else None
 
 
+_EARN_NUM = r"[-−△]?\d[\d,]*(?:\.\d+)?"
+_EARN_FLAG = r"(?:흑자|적자)(?:전환|지속|확대|축소)"
+_EARN_CELL = rf"(?:{_EARN_NUM}|{_EARN_FLAG}|-)"
+
+
+def _earn_cell(tok: str):
+    """표 칸 하나 → 숫자 / None('-' 빈칸) / 흑자·적자 문구."""
+    tok = tok.strip()
+    if tok == "-":
+        return None
+    if re.fullmatch(_EARN_FLAG, tok):
+        return tok
+    try:
+        return float(re.sub(r"[\s,]", "", tok).replace("−", "-").replace("△", "-"))
+    except ValueError:
+        return None
+
+
+def _earn_change(cur: float, base, pct, flag):
+    """증감 표시값. 한쪽이라도 적자면 %가 무의미하므로 흑자전환·적자전환·적자지속으로."""
+    if isinstance(flag, str):
+        return flag
+    if isinstance(base, float):
+        if base < 0 and cur >= 0:
+            return "흑자전환"
+        if base >= 0 and cur < 0:
+            return "적자전환"
+        if base < 0 and cur < 0:
+            return "적자지속"
+    if isinstance(pct, float) and abs(pct) < 5000:
+        return pct
+    return None
+
+
+def _earnings_metric(text: str, label: str):
+    """잠정실적 표의 한 줄(매출액·영업이익…) → (당해실적, YoY, QoQ).
+
+    표 칸 순서(공정공시 서식): 당해 / 전기 / 전기대비 증감률 / 흑자·적자 전환 /
+    전년동기 / 전년동기대비 증감률 / 흑자·적자 전환. 옛 서식은 전환 칸 없이 5칸.
+    빈칸 '-'도 자리를 지켜야 열이 밀리지 않는다. 음수는 '-'·'−'·'△' 모두 인식
+    (2026-10-28 큐리옥스 영업손실 -3,960이 '영업익 40억'으로 나간 버그).
+    """
+    m = re.search(re.escape(label) + rf"\s*당해실적((?:\s*{_EARN_CELL}){{3,9}})", text)
+    if not m:
+        return None
+    cells = [_earn_cell(t) for t in re.findall(rf"{_EARN_CELL}(?=\s|$)", m.group(1) + " ")]
+    if not cells or not isinstance(cells[0], float):
+        return None
+    cur = cells[0]
+    get = lambda i: cells[i] if i < len(cells) else None  # noqa: E731
+    if len(cells) >= 7:
+        qoq = _earn_change(cur, get(1), get(2), get(3))
+        yoy = _earn_change(cur, get(4), get(5), get(6))
+    elif len(cells) >= 5:
+        qoq = _earn_change(cur, get(1), get(2), None)
+        yoy = _earn_change(cur, get(3), get(4), None)
+    else:
+        qoq = None
+        yoy = _earn_change(cur, None, get(len(cells) - 1), None)
+    return cur, yoy, qoq
+
+
 def _sum_earnings(api_key: str, rcept_no: str, ctx: dict | None = None) -> str | None:
     text = _doc_text(api_key, rcept_no)
     unit = _detect_unit_won(text)
 
-    def metric(label: str) -> tuple[float, float | None] | None:
-        m = re.search(re.escape(label)
-                      + r"\s*당해실적((?:\s*(?:-|△?[\d,]+(?:\.\d+)?)){3,9})", text)
-        if not m:
-            return None
-        toks = re.findall(r"△?[\d,]+(?:\.\d+)?", m.group(1))
-        nums = []
-        for t in toks:
-            try:
-                nums.append(float(t.replace(",", "").replace("△", "-")))
-            except ValueError:
-                return None
-        if not nums:
-            return None
-        yoy = nums[-1] if len(nums) >= 3 and abs(nums[-1]) < 5000 else None
-        # 표 열 순서: 당해 / 전기 / 전기대비증감율 / 전년동기 / 전년동기대비증감율 → 3번째가 QoQ
-        qoq = nums[2] if len(nums) >= 5 and abs(nums[2]) < 5000 else None
-        return nums[0], yoy, qoq
+    def metric(label: str):
+        return _earnings_metric(text, label)
 
     rev, op, ni = metric("매출액"), metric("영업이익"), metric("당기순이익")
     if not rev or not op:
@@ -849,10 +895,11 @@ def _sum_earnings(api_key: str, rcept_no: str, ctx: dict | None = None) -> str |
             return f"{name}: -"
         line = f"{name}: {_eok(m[0] * unit)}"
         notes = []
-        if len(m) > 2 and m[2] is not None:
-            notes.append(f"QoQ {m[2]:+.1f}%")
-        if m[1] is not None:
-            notes.append(f"YoY {m[1]:+.1f}%")
+        for tag, v in (("QoQ", m[2] if len(m) > 2 else None), ("YoY", m[1])):
+            if isinstance(v, str):
+                notes.append(f"{tag} {v}")
+            elif v is not None:
+                notes.append(f"{tag} {v:+.1f}%")
         if name == "영업익" and rev and rev[0]:
             notes.append(f"OPM {m[0] / rev[0] * 100:.1f}%")   # 영업이익률 (2026-10-02)
         est = cons_vals.get(cons_key) if cons_vals else None
