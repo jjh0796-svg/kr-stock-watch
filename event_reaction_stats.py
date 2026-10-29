@@ -447,6 +447,7 @@ def dart_get(endpoint: str, params: dict, binary: bool = False):
     sub = CACHE / "dart" / endpoint.replace(".", "_")
     path = sub / (tag + (".bin" if binary else ".json"))
     if path.exists():
+        os.utime(path)   # 이번 빌드에 쓰였다는 표시 — 월간 갱신이 안 쓰인 캐시만 지운다
         return path.read_bytes() if binary else json.loads(path.read_text(encoding="utf-8"))
     if dart_calls_used() >= DART_BUDGET:
         raise BudgetExceeded(f"DART 예산 {DART_BUDGET}건 소진")
@@ -478,12 +479,10 @@ def dart_get(endpoint: str, params: dict, binary: bool = False):
 
 
 def collect_list(bgn: str, end: str) -> list[dict]:
-    """주요사항보고(B)·거래소공시(I) × 코스피(Y)·코스닥(K), 3개월 창으로 끊어서."""
+    """주요사항보고(B)·거래소공시(I) × 코스피(Y)·코스닥(K), 달력 한 달 창으로 끊어서.
+    창이 달력 달에 맞춰져 있어 월간 갱신 때 지난달까지의 목록은 캐시를 그대로 쓴다(새로 받는 건 새 달뿐)."""
     out: dict[str, dict] = {}
-    d0 = datetime.strptime(bgn, "%Y%m%d")
-    d_end = datetime.strptime(end, "%Y%m%d")
-    while d0 <= d_end:
-        d1 = min(d0 + timedelta(days=88), d_end)
+    for d0, d1 in month_windows(bgn, end):
         for ty in ("B", "I"):
             for cls in ("Y", "K"):
                 page = 1
@@ -497,8 +496,30 @@ def collect_list(bgn: str, end: str) -> list[dict]:
                         break
                     page += 1
         print(f"[list] {d0:%Y%m%d}~{d1:%Y%m%d} 누적 {len(out):,}건 · DART {dart_calls_used()}건", flush=True)
-        d0 = d1 + timedelta(days=1)
     return list(out.values())
+
+
+def month_windows(bgn: str, end: str) -> list[tuple[date, date]]:
+    """bgn~end를 달력 달 단위로 자른 [(시작일, 끝일)] — 첫·끝 창만 달 일부일 수 있다."""
+    d0 = datetime.strptime(bgn, "%Y%m%d").date()
+    d_end = datetime.strptime(end, "%Y%m%d").date()
+    out = []
+    while d0 <= d_end:
+        nxt = date(d0.year + (d0.month == 12), d0.month % 12 + 1, 1)
+        d1 = min(nxt - timedelta(days=1), d_end)
+        out.append((d0, d1))
+        d0 = d1 + timedelta(days=1)
+    return out
+
+
+def pick_sample(pool: list[dict], n: int, rng: random.Random, cached) -> list[dict]:
+    """원문 표본 n건 — 이미 읽어 둔 공시를 먼저 쓰고 모자란 만큼만 새로 무작위로 뽑는다.
+    (월간 갱신 때 표본이 통째로 바뀌어 원문을 1,400건씩 다시 받는 일을 막는다. 원래 표본도 무작위라 치우침 없음)"""
+    have = [e for e in pool if cached(e["rcept_no"])]
+    rest = [e for e in pool if not cached(e["rcept_no"])]
+    rng.shuffle(have)
+    rng.shuffle(rest)
+    return sorted((have + rest)[:n], key=lambda e: e["rcept_no"])
 
 
 def fetch_after_close_times(day: str) -> dict:
@@ -705,9 +726,8 @@ def build(args) -> None:
                         attrs[rn]["bond_method"] = row.get("bdis_mthn")
         for etype, n_sample, parser in (("supply", args.supply_sample, "supply"),
                                         ("earnings", args.earnings_sample, "earnings")):
-            pool = [e for e in events if e["type"] == etype]
-            rng.shuffle(pool)
-            pool = sorted(pool[:n_sample], key=lambda e: e["rcept_no"])
+            pool = pick_sample([e for e in events if e["type"] == etype], n_sample, rng,
+                               lambda rn: (CACHE / "parsed" / f"{rn}.json").exists())
             print(f"[attrs] {etype} 원문 표본 {len(pool)}/{sum(1 for e in events if e['type'] == etype)}건", flush=True)
             for i, e in enumerate(pool, 1):
                 pc = CACHE / "parsed" / f"{e['rcept_no']}.json"
