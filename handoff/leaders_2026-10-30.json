@@ -1,0 +1,164 @@
+{
+ "date": "2026-10-30",
+ "candidates": [
+  {
+   "code": "003220",
+   "name": "대원제약",
+   "bucket": 1,
+   "pct": 23.97
+  },
+  {
+   "code": "489790",
+   "name": "한화비전",
+   "bucket": 1,
+   "pct": 22.26
+  },
+  {
+   "code": "249420",
+   "name": "일동제약",
+   "bucket": 1,
+   "pct": 8.21
+  },
+  {
+   "code": "017900",
+   "name": "광전자",
+   "bucket": 1,
+   "pct": 21.53
+  },
+  {
+   "code": "012170",
+   "name": "아센디오",
+   "bucket": 1,
+   "pct": 15.89
+  },
+  {
+   "code": "000660",
+   "name": "SK하이닉스",
+   "bucket": 2,
+   "pct": 1.95
+  },
+  {
+   "code": "175330",
+   "name": "JB금융지주",
+   "bucket": 2,
+   "pct": 6.13
+  },
+  {
+   "code": "128940",
+   "name": "한미약품",
+   "bucket": 2,
+   "pct": 7.04
+  },
+  {
+   "code": "071050",
+   "name": "한국금융지주",
+   "bucket": 2,
+   "pct": 4.35
+  },
+  {
+   "code": "068270",
+   "name": "셀트리온",
+   "bucket": "sector",
+   "pct": 0.0
+  },
+  {
+   "code": "328130",
+   "name": "루닛",
+   "bucket": "sector",
+   "pct": 0.0
+  },
+  {
+   "code": "047040",
+   "name": "대우건설",
+   "bucket": "sector",
+   "pct": 0.0
+  },
+  {
+   "code": "028050",
+   "name": "삼성E&A",
+   "bucket": "sector",
+   "pct": 0.0
+  },
+  {
+   "code": "006400",
+   "name": "삼성SDI",
+   "bucket": "sector",
+   "pct": 0.0
+  },
+  {
+   "code": "373220",
+   "name": "LG에너지솔루션",
+   "bucket": "sector",
+   "pct": 0.0
+  }
+ ],
+ "core": [
+  "489790"
+ ],
+ "levels": {
+  "kospi": {
+   "date": "2026-10-29",
+   "close": 5937.66,
+   "high": 6100.11,
+   "low": 5817.92,
+   "ma5": 5721.642
+  },
+  "fx_high": 1344.14
+ },
+ "sectors": [
+  {
+   "name": "헬스",
+   "stance": "🟢",
+   "industries": [
+    "제약",
+    "건강관리기술",
+    "건강관리장비와용품"
+   ],
+   "picks": [
+    {
+     "code": "068270",
+     "name": "셀트리온"
+    },
+    {
+     "code": "328130",
+     "name": "루닛"
+    }
+   ]
+  },
+  {
+   "name": "부동산",
+   "stance": "🟢",
+   "industries": [
+    "부동산",
+    "건설"
+   ],
+   "picks": [
+    {
+     "code": "047040",
+     "name": "대우건설"
+    },
+    {
+     "code": "028050",
+     "name": "삼성E&A"
+    }
+   ]
+  },
+  {
+   "name": "2차전지",
+   "stance": "🔴",
+   "industries": [
+    "전기제품"
+   ],
+   "picks": [
+    {
+     "code": "006400",
+     "name": "삼성SDI"
+    },
+    {
+     "code": "373220",
+     "name": "LG에너지솔루션"
+    }
+   ]
+  }
+ ]
+}
