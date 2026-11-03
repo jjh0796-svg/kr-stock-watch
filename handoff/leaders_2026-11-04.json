@@ -1,0 +1,153 @@
+{
+ "date": "2026-11-04",
+ "candidates": [
+  {
+   "code": "267850",
+   "name": "아시아나IDT",
+   "bucket": 1,
+   "pct": 12.56
+  },
+  {
+   "code": "002320",
+   "name": "한진",
+   "bucket": 1,
+   "pct": 17.93
+  },
+  {
+   "code": "211270",
+   "name": "AP위성",
+   "bucket": 1,
+   "pct": 29.98
+  },
+  {
+   "code": "150900",
+   "name": "파수AI",
+   "bucket": 1,
+   "pct": 17.57
+  },
+  {
+   "code": "430690",
+   "name": "한싹",
+   "bucket": 1,
+   "pct": 29.96
+  },
+  {
+   "code": "000270",
+   "name": "기아",
+   "bucket": 2,
+   "pct": 1.04
+  },
+  {
+   "code": "376900",
+   "name": "로킷헬스케어",
+   "bucket": 2,
+   "pct": 17.62
+  },
+  {
+   "code": "196170",
+   "name": "알테오젠",
+   "bucket": "sector",
+   "pct": 0.0
+  },
+  {
+   "code": "278650",
+   "name": "HLB바이오스텝",
+   "bucket": "sector",
+   "pct": 0.0
+  },
+  {
+   "code": "000660",
+   "name": "SK하이닉스",
+   "bucket": "sector",
+   "pct": 0.0
+  },
+  {
+   "code": "005930",
+   "name": "삼성전자",
+   "bucket": "sector",
+   "pct": 0.0
+  },
+  {
+   "code": "005490",
+   "name": "POSCO홀딩스",
+   "bucket": "sector",
+   "pct": 0.0
+  },
+  {
+   "code": "003670",
+   "name": "포스코퓨처엠",
+   "bucket": "sector",
+   "pct": 0.0
+  }
+ ],
+ "core": [],
+ "levels": {
+  "kospi": {
+   "date": "2026-11-03",
+   "close": 5648.79,
+   "high": 5735.92,
+   "low": 5615.8,
+   "ma5": 5837.742
+  },
+  "fx_high": 1346.58
+ },
+ "sectors": [
+  {
+   "name": "바이오",
+   "stance": "🟢",
+   "industries": [
+    "생물공학",
+    "생명과학도구및서비스"
+   ],
+   "picks": [
+    {
+     "code": "196170",
+     "name": "알테오젠"
+    },
+    {
+     "code": "278650",
+     "name": "HLB바이오스텝"
+    }
+   ]
+  },
+  {
+   "name": "기술",
+   "stance": "🟢",
+   "industries": [
+    "소프트웨어",
+    "IT서비스",
+    "반도체와반도체장비",
+    "디스플레이장비및부품"
+   ],
+   "picks": [
+    {
+     "code": "000660",
+     "name": "SK하이닉스"
+    },
+    {
+     "code": "005930",
+     "name": "삼성전자"
+    }
+   ]
+  },
+  {
+   "name": "소재",
+   "stance": "🔴",
+   "industries": [
+    "비철금속",
+    "화학",
+    "철강"
+   ],
+   "picks": [
+    {
+     "code": "005490",
+     "name": "POSCO홀딩스"
+    },
+    {
+     "code": "003670",
+     "name": "포스코퓨처엠"
+    }
+   ]
+  }
+ ]
+}
