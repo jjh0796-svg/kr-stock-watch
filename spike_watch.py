@@ -4,7 +4,8 @@
 - 유니버스: 워치리스트(watchlist.csv+holdings.csv) + 코스피·코스닥 등락률 상위/하위
   각 20종목 + 거래대금 상위 각 20종목
 - 트리거:
-  T1 급변: 최근 5분 ±3% 이상 (전 유니버스) / 등락 상위 리스트 최초 진입(±7%↑)
+  T1 등락률 단계 돌파(2026-11-06 개편): 전일 종가(거래소 기준가) 대비 등락률이 단계를 처음 넘을 때 1회
+     내 종목 ±5·10·15·20·25%·상/하한가, 시장 종목 ±10·15·20·25%·상/하한가 (예전 5분 ±3%·상위진입 ±7%·재알림 상한 폐지)
   T2 거래량: 당일 누적 거래량이 20일 평균의 300% 돌파 (워치리스트만)
   T2b 거래량 폭발: 거래대금 상위 종목이 당일 누적 20일 평균 3배 돌파 (시장 전체 입구)
   T3 52주 신고가/신저가 터치 (워치리스트만)
@@ -38,8 +39,9 @@ STATE_DIR = Path(os.environ.get("SPIKE_STATE_DIR",
                                 str(Path.home() / ".spike_watch")))
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
-CHG_5MIN = 3.0        # T1: 5분 변동 임계 (%)
-CHG_ENTRY = 7.0       # T1b: 등락 상위 최초 진입 알림 임계 (%)
+LEVELS_MINE = (5, 10, 15, 20, 25)     # T1 등락률 단계(%) — 내 종목(⭐💼🌅)
+LEVELS_MARKET = (10, 15, 20, 25)      # 시장 종목
+LIMIT_RATE = 29.5                     # 이 이상이면 상한가/하한가 단계(가격제한폭 ±30%)
 VOL_MULT = 3.0        # T2: 20일 평균 거래량 대비 배수
 RANK_N = 20           # 등락 상위/하위 각 종목 수
 AMOUNT_N = 20         # 거래대금 상위 스캔 종목 수 (시장별) — 2026-09-01 추가
@@ -47,8 +49,6 @@ AMOUNT_N = 20         # 거래대금 상위 스캔 종목 수 (시장별) — 20
 # 실전성 개편 (2026-09-18): 시장 스캔분은 매매 가능한 종목만, 5분 묶음으로
 MIN_MKTCAP = 1e11         # 시장 스캔분 시총 하한 1,000억 (⭐관심·💼보유는 면제) — 사용자 지정 9/19
 MIN_VALUE_FULLDAY = 2e9   # 거래대금 하한 — 종일 기준 20억, 장중엔 경과시간 비례(최소 20%)
-T1_MAX_MARKET = 4         # 시장 종목의 5분 급변 알림 하루 최대 횟수 (11/6 사용자 요청 2→4)
-T1_MAX_MINE = None        # 내 종목은 상한 없음(11/6) — 직전 알림가 대비 추가 ±3% 조건은 유지
 DIGEST_MIN = 5            # 시장 신호 묶음 발송 주기(분) — 내 종목 신호는 즉시
 
 
@@ -591,21 +591,14 @@ def send(lines):
         print(f"send 예외: {e}")
 
 
-def price_minutes_ago(h, now, minutes=5, slack=1):
-    """이력 h=[["HH:MM", 가격], ...]에서 실제로 약 minutes분 전(±slack분) 가격. 없으면 None.
-    11/6 버그: 감시 대상에서 빠졌다 다시 들어온 종목은 이력이 끊겨 h[-6]이 몇 시간 전 가격이 됐다
-    (프로티나 10:00 45,350원 → 14:19 57,300원을 '5분 +26.4%'로 발송)."""
-    best = None
-    for ts_, p in h[:-1]:
-        try:
-            hh, mm = map(int, str(ts_).split(":"))
-        except ValueError:
-            continue
-        age = (now.hour * 60 + now.minute) - (hh * 60 + mm)
-        if abs(age - minutes) <= slack and p and p > 0:
-            if best is None or abs(age - minutes) < best[0]:
-                best = (abs(age - minutes), p)
-    return best[1] if best else None
+def level_steps(rate, mine):
+    """등락률 rate(%)가 이미 넘은 단계 라벨 목록(낮은 단계부터). 예: +16.2%, 시장 → ["+10%", "+15%"]."""
+    levels = LEVELS_MINE if mine else LEVELS_MARKET
+    sign = "+" if rate > 0 else "-"
+    out = [f"{sign}{lv}%" for lv in levels if abs(rate) >= lv]
+    if abs(rate) >= LIMIT_RATE:
+        out.append("상한가" if rate > 0 else "하한가")
+    return out
 
 
 def tick():
@@ -681,42 +674,27 @@ def tick():
 
         s = sent.get(code, {})
 
-        # T1(5분 급변) + T1b(등락 상위 최초 진입) — 같은 틱에 겹치면 한 줄로 통합
-        t1_hit, chg5 = False, 0.0
-        base5 = price_minutes_ago(h, now, 5)
-        if base5:
-            chg5 = (price / base5 - 1) * 100
-            last_alert_price = s.get("t1")
-            count = int(s.get("t1n", 0) or 0)
-            cap = T1_MAX_MINE if mine else T1_MAX_MARKET   # 하루 재알림 상한
-            need = (last_alert_price is None or
-                    abs(price / last_alert_price - 1) * 100 >= CHG_5MIN)
-            t1_hit = abs(chg5) >= CHG_5MIN and need and (cap is None or count < cap)
-        entry_hit = code in ranked and abs(rate) >= CHG_ENTRY and not s.get("entry")
-        if t1_hit or entry_hit:
-            parts, flip = [], ""
-            if t1_hit:
-                # 섹션은 "5분 변동" 기준 — 당일과 방향이 다르면 반전 표시
-                if chg5 > 0 > rate:
-                    flip = " ↗반등중"
-                elif chg5 < 0 < rate:
-                    flip = " ↘반락중"
-                parts.append(f"5분 {chg5:+.1f}%")
-            parts.append(f"당일 {rate:+.1f}%{flip}")
-            if entry_hit:
-                parts.append("상위진입")
-            direction = ("up" if chg5 > 0 else "down") if t1_hit else ("up" if rate > 0 else "down")
+        # T1 등락률 단계 돌파 — 전일 종가 대비 등락률이 새 단계를 넘을 때만(단계당 하루 1회)
+        steps = level_steps(rate, mine)
+        done = dict(s.get("lv") or {})
+        new = [x for x in steps if x not in done]
+        if new:
+            for x in new:
+                done[x] = ts
+            top = new[-1]
+            # 같은 시각에 한꺼번에 넘은 단계는 마지막 것만 표시
+            shown = [x for k, x in enumerate(steps) if k == len(steps) - 1 or done[x] != done[steps[k + 1]]]
+            path = " → ".join(f"{x} {done[x]}" for x in shown)
+            direction = "up" if rate > 0 else "down"
+            head = top if top in ("상한가", "하한가") else f"{top} 돌파"
             signals.append({
                 "code": code, "name": name, "sec": direction, "dir": direction,
-                "key": abs(chg5) if t1_hit else abs(rate), "mine": mine,
-                "line": f"{tag} {name} " + " · ".join(parts) + f" · {price:,.0f}원",
-                "note": " / ".join(parts),
+                "key": abs(rate), "mine": mine,
+                "line": f"{tag} {name} {head} · 현재 {rate:+.1f}% · {price:,.0f}원"
+                        + (f" ({path})" if len(shown) > 1 else ""),
+                "note": head,
             })
-            if t1_hit:
-                mark(code, "t1", price)
-                mark(code, "t1n", int(s.get("t1n", 0) or 0) + 1)
-            if entry_hit:
-                mark(code, "entry")
+            mark(code, "lv", done)
 
         # T2b: 거래대금 상위 종목의 거래량 폭발 — 당일 누적이 20일 평균의 3배 이상
         mv = mvol.get(code, {}).get("avg", 0)
@@ -788,8 +766,8 @@ def tick():
                 out.append(f"… 외 {len(items) - n}건")
             return out
 
-        lines += section("🔴 급등 신호 (5분/진입)", [x for x in sigs if x["sec"] == "up"], 8)
-        lines += section("🔵 급락 신호 (5분/진입)", [x for x in sigs if x["sec"] == "down"], 8)
+        lines += section("🔴 상승 단계 돌파 (전일 종가 대비)", [x for x in sigs if x["sec"] == "up"], 8)
+        lines += section("🔵 하락 단계 돌파 (전일 종가 대비)", [x for x in sigs if x["sec"] == "down"], 8)
         lines += section("📢 거래량·52주", [x for x in sigs if x["sec"] == "other"], 6)
         return lines
 
