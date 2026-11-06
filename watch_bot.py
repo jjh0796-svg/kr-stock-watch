@@ -10,7 +10,7 @@
   /도움말
 
 - 저장: WATCHLIST_FILE (기본 ~/bots/watchlist.csv, "코드,이름" 줄 단위)
-- 보안: TELEGRAM_CHAT_ID 로 지정된 대화만 응답 (그 외 무시)
+- 보안: WATCH_ADMIN_CHAT_ID(없으면 TELEGRAM_CHAT_ID)로 지정된 대화만 응답 (그 외 무시)
 - 운영: systemd 상주 서비스 (긴 폴링, 죽으면 자동 재시작)
 """
 import os
@@ -264,9 +264,10 @@ def register_menu(token):
 def main():
     load_env()
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    allowed = os.environ.get("TELEGRAM_CHAT_ID", "")
+    # 11/6 알림은 채널(TELEGRAM_CHAT_ID)로 옮기고, 명령은 사용자 1:1 대화(WATCH_ADMIN_CHAT_ID)에서만 받는다.
+    allowed = os.environ.get("WATCH_ADMIN_CHAT_ID") or os.environ.get("TELEGRAM_CHAT_ID", "")
     if not token or not allowed:
-        sys.exit("TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID 필요 (~/bots/krwatch.env)")
+        sys.exit("TELEGRAM_BOT_TOKEN/WATCH_ADMIN_CHAT_ID(또는 TELEGRAM_CHAT_ID) 필요 (~/bots/krwatch.env)")
     api = f"https://api.telegram.org/bot{token}"
     offset = 0
     register_menu(token)

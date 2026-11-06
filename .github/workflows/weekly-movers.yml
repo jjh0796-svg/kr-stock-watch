@@ -35,7 +35,7 @@ jobs:
         env:
           KRX_AUTH_KEY: ${{ secrets.KRX_AUTH_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_CHAT_ID: ${{ vars.KRWATCH_CHAT_ID || secrets.TELEGRAM_CHAT_ID }}  # 11/6 종목모니터링방 채널
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           DRY_RUN: ${{ inputs.dry_run == true && '1' || '' }}
         run: python weekly_movers.py
