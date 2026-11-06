@@ -591,6 +591,23 @@ def send(lines):
         print(f"send 예외: {e}")
 
 
+def price_minutes_ago(h, now, minutes=5, slack=1):
+    """이력 h=[["HH:MM", 가격], ...]에서 실제로 약 minutes분 전(±slack분) 가격. 없으면 None.
+    11/6 버그: 감시 대상에서 빠졌다 다시 들어온 종목은 이력이 끊겨 h[-6]이 몇 시간 전 가격이 됐다
+    (프로티나 10:00 45,350원 → 14:19 57,300원을 '5분 +26.4%'로 발송)."""
+    best = None
+    for ts_, p in h[:-1]:
+        try:
+            hh, mm = map(int, str(ts_).split(":"))
+        except ValueError:
+            continue
+        age = (now.hour * 60 + now.minute) - (hh * 60 + mm)
+        if abs(age - minutes) <= slack and p and p > 0:
+            if best is None or abs(age - minutes) < best[0]:
+                best = (abs(age - minutes), p)
+    return best[1] if best else None
+
+
 def tick():
     now = datetime.datetime.now()
     if not in_session(now):
@@ -666,8 +683,9 @@ def tick():
 
         # T1(5분 급변) + T1b(등락 상위 최초 진입) — 같은 틱에 겹치면 한 줄로 통합
         t1_hit, chg5 = False, 0.0
-        if len(h) >= 6 and h[-6][1] > 0:
-            chg5 = (price / h[-6][1] - 1) * 100
+        base5 = price_minutes_ago(h, now, 5)
+        if base5:
+            chg5 = (price / base5 - 1) * 100
             last_alert_price = s.get("t1")
             count = int(s.get("t1n", 0) or 0)
             cap = T1_MAX_MINE if mine else T1_MAX_MARKET   # 하루 재알림 상한
