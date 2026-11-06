@@ -1,0 +1,161 @@
+{
+ "date": "2026-11-07",
+ "candidates": [
+  {
+   "code": "004830",
+   "name": "덕성",
+   "bucket": 1,
+   "pct": 19.79
+  },
+  {
+   "code": "089860",
+   "name": "롯데렌탈",
+   "bucket": 1,
+   "pct": 10.59
+  },
+  {
+   "code": "206640",
+   "name": "바디텍메드",
+   "bucket": 1,
+   "pct": 6.18
+  },
+  {
+   "code": "261780",
+   "name": "아리바이오랩",
+   "bucket": 1,
+   "pct": 11.82
+  },
+  {
+   "code": "317400",
+   "name": "자이에스앤디",
+   "bucket": 1,
+   "pct": 12.23
+  },
+  {
+   "code": "119850",
+   "name": "지엔씨에너지",
+   "bucket": 2,
+   "pct": 13.16
+  },
+  {
+   "code": "0158S0",
+   "name": "엘리스",
+   "bucket": 2,
+   "pct": 20.95
+  },
+  {
+   "code": "035420",
+   "name": "NAVER",
+   "bucket": 3,
+   "pct": 2.0
+  },
+  {
+   "code": "196170",
+   "name": "알테오젠",
+   "bucket": "sector",
+   "pct": 0.0
+  },
+  {
+   "code": "468530",
+   "name": "프로티나",
+   "bucket": "sector",
+   "pct": 0.0
+  },
+  {
+   "code": "000660",
+   "name": "SK하이닉스",
+   "bucket": "sector",
+   "pct": 0.0
+  },
+  {
+   "code": "005930",
+   "name": "삼성전자",
+   "bucket": "sector",
+   "pct": 0.0
+  },
+  {
+   "code": "010060",
+   "name": "OCI홀딩스",
+   "bucket": "sector",
+   "pct": 0.0
+  },
+  {
+   "code": "005490",
+   "name": "POSCO홀딩스",
+   "bucket": "sector",
+   "pct": 0.0
+  }
+ ],
+ "core": [
+  "0158S0"
+ ],
+ "levels": {
+  "kospi": {
+   "date": "2026-11-06",
+   "close": 5059.69,
+   "high": 5269.1,
+   "low": 4911.28,
+   "ma5": 5527.032
+  },
+  "fx_high": 1354.17
+ },
+ "sectors": [
+  {
+   "name": "바이오",
+   "stance": "🟢",
+   "industries": [
+    "생물공학",
+    "생명과학도구및서비스"
+   ],
+   "picks": [
+    {
+     "code": "196170",
+     "name": "알테오젠"
+    },
+    {
+     "code": "468530",
+     "name": "프로티나"
+    }
+   ]
+  },
+  {
+   "name": "기술",
+   "stance": "🟢",
+   "industries": [
+    "IT서비스",
+    "소프트웨어",
+    "디스플레이장비및부품",
+    "반도체와반도체장비"
+   ],
+   "picks": [
+    {
+     "code": "000660",
+     "name": "SK하이닉스"
+    },
+    {
+     "code": "005930",
+     "name": "삼성전자"
+    }
+   ]
+  },
+  {
+   "name": "소재",
+   "stance": "🔴",
+   "industries": [
+    "철강",
+    "비철금속",
+    "화학"
+   ],
+   "picks": [
+    {
+     "code": "010060",
+     "name": "OCI홀딩스"
+    },
+    {
+     "code": "005490",
+     "name": "POSCO홀딩스"
+    }
+   ]
+  }
+ ]
+}
