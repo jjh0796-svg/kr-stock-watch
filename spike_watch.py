@@ -573,10 +573,16 @@ def log_signal(code, name, direction, note):
         pass
 
 
+# 11/6 사용자: 채널에서 '어디서 편집하나' 헷갈림 → 💼/⭐ 종목이 들어간 메시지 끝에 한 줄 안내(CODEX positions.EDIT_HINT와 같은 문구)
+EDIT_HINT = "✏️ 💼보유·⭐관심 종목 편집: @companymonitor_0796_bot 1:1 대화에서 /hold · /spike (공시 종목은 @filingsmonitor_0796_bot)"
+
+
 def send(lines):
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat = os.environ.get("TELEGRAM_CHAT_ID")
     text = "\n".join(lines)
+    if ("💼" in text or "⭐" in text) and EDIT_HINT not in text:
+        text = text.rstrip() + "\n\n" + EDIT_HINT
     if not token or not chat:
         print("[관찰모드] 발송 생략:\n" + text)
         return
