@@ -11,7 +11,7 @@
 - 노이즈 억제: 종목·트리거당 1일 1회, T1 재알림은 직전 알림가 대비 추가 ±3%시.
   장 시작 직후(09:00~09:05) 제외, 폴링 매분 09:05~15:30.
 - 실전성 개편(2026-09-18): ①시장 스캔분은 시총 1,000억↑·거래대금(경과시간 비례 20억) 통과만
-  (⭐💼 면제) ②내 종목은 즉시, 시장분은 5분 묶음 ③T1 재알림 하루 상한(시장 2·내 종목 4),
+  (⭐💼 면제) ②내 종목은 즉시, 시장분은 5분 묶음 ③T1 재알림 하루 상한(시장 2·내 종목 4 → 11/6 시장 4·내 종목 무제한),
   급변+상위진입 한 줄 통합 ④당일 종목뉴스 '왜' 한 줄 ⑤같은 업종 동반 신호는 🧩 테마 줄.
 
 사용 (오라클 서버 cron):
@@ -47,8 +47,8 @@ AMOUNT_N = 20         # 거래대금 상위 스캔 종목 수 (시장별) — 20
 # 실전성 개편 (2026-09-18): 시장 스캔분은 매매 가능한 종목만, 5분 묶음으로
 MIN_MKTCAP = 1e11         # 시장 스캔분 시총 하한 1,000억 (⭐관심·💼보유는 면제) — 사용자 지정 9/19
 MIN_VALUE_FULLDAY = 2e9   # 거래대금 하한 — 종일 기준 20억, 장중엔 경과시간 비례(최소 20%)
-T1_MAX_MARKET = 2         # 시장 종목의 5분 급변 알림 하루 최대 횟수
-T1_MAX_MINE = 4           # 내 종목은 좀 더 허용
+T1_MAX_MARKET = 4         # 시장 종목의 5분 급변 알림 하루 최대 횟수 (11/6 사용자 요청 2→4)
+T1_MAX_MINE = None        # 내 종목은 상한 없음(11/6) — 직전 알림가 대비 추가 ±3% 조건은 유지
 DIGEST_MIN = 5            # 시장 신호 묶음 발송 주기(분) — 내 종목 신호는 즉시
 
 
@@ -673,7 +673,7 @@ def tick():
             cap = T1_MAX_MINE if mine else T1_MAX_MARKET   # 하루 재알림 상한
             need = (last_alert_price is None or
                     abs(price / last_alert_price - 1) * 100 >= CHG_5MIN)
-            t1_hit = abs(chg5) >= CHG_5MIN and need and count < cap
+            t1_hit = abs(chg5) >= CHG_5MIN and need and (cap is None or count < cap)
         entry_hit = code in ranked and abs(rate) >= CHG_ENTRY and not s.get("entry")
         if t1_hit or entry_hit:
             parts, flip = [], ""
