@@ -577,7 +577,8 @@ def log_signal(code, name, direction, note):
 EDIT_HINT = "✏️ 💼보유·⭐관심 종목 편집: @companymonitor_0796_bot 1:1 대화에서 /hold · /spike (공시 종목은 @filingsmonitor_0796_bot)"
 
 
-def send(lines):
+def send(lines, reply_to=None):
+    """발송. 성공하면 message_id(답글 달 때 씀), 아니면 None."""
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat = os.environ.get("TELEGRAM_CHAT_ID")
     text = "\n".join(lines)
@@ -585,16 +586,64 @@ def send(lines):
         text = text.rstrip() + "\n\n" + EDIT_HINT
     if not token or not chat:
         print("[관찰모드] 발송 생략:\n" + text)
-        return
+        return None
+    payload = {"chat_id": chat, "text": text, "disable_web_page_preview": True}
+    if reply_to:
+        payload["reply_parameters"] = {"message_id": reply_to, "allow_sending_without_reply": True}
     # 실패가 조용히 사라지면 "보냈는데 안 온" 사고를 진단할 수 없다 — 결과를 로그에 남긴다
     try:
-        r = requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
-                          json={"chat_id": chat, "text": text,
-                              "disable_web_page_preview": True}, timeout=20)
+        r = requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json=payload, timeout=20)
         if r.status_code != 200:
             print(f"send 실패 HTTP {r.status_code}: {r.text[:150]}")
+            return None
+        return (r.json().get("result") or {}).get("message_id")
     except Exception as e:
         print(f"send 예외: {e}")
+        return None
+
+
+def reason_followups(mine_sigs, msg_id, day, ts, now):
+    """내 종목 ±10% 이상 단계 돌파 → 그 알림의 답글로 '왜' AI 요약(11/11). 종목·방향당 하루 1회 + 재료 없으면 10분 뒤 1회 재확인."""
+    import spike_reason
+    if not spike_reason.enabled():
+        return
+    path = STATE_DIR / f"reason_{day}.json"
+    st = load_json(path, {"done": {}, "pending": []})
+    # ① 재확인 대기분
+    keep = []
+    for p in st.get("pending", []):
+        t0 = datetime.datetime.strptime(f"{day} {p['ts']}", "%Y%m%d %H:%M")
+        if (now - t0).total_seconds() < spike_reason.RECHECK_MIN * 60:
+            keep.append(p)
+            continue
+        try:
+            res = spike_reason.analyze(p["code"], p["name"], p["dir"], p["move"])
+            print(f"{ts} 사유 재확인 {p['name']} found={res['found']} model={res['model']}")
+            if res["found"]:
+                send([res["text"]], reply_to=p.get("msg"))
+        except Exception as e:
+            print(f"[warn] 사유 재확인 실패 {p.get('name')}: {type(e).__name__}")
+    st["pending"] = keep
+    # ② 이번 회차 신호
+    for sig in mine_sigs:
+        if sig["sec"] not in ("up", "down") or spike_reason.level_of(sig["note"]) < spike_reason.MIN_LEVEL:
+            continue
+        key = f"{sig['code']}:{sig['dir']}"
+        if key in st["done"]:
+            continue
+        st["done"][key] = ts
+        try:
+            res = spike_reason.analyze(sig["code"], sig["name"], sig["dir"], sig["note"])
+            print(f"{ts} 사유 분석 {sig['name']} found={res['found']} model={res['model']}")
+            if res["found"]:
+                send([res["text"]], reply_to=msg_id)
+            else:
+                send([spike_reason.not_found_text(sig["name"], sig["dir"])], reply_to=msg_id)
+                st["pending"].append({"code": sig["code"], "name": sig["name"], "dir": sig["dir"],
+                                      "move": sig["note"], "ts": ts, "msg": msg_id})
+        except Exception as e:
+            print(f"[warn] 사유 분석 실패 {sig['name']}: {type(e).__name__}")
+    save_json(path, st)
 
 
 def level_steps(rate, mine):
@@ -784,7 +833,13 @@ def tick():
     mine_sigs = [x for x in signals if x["mine"]]
     if mine_sigs:
         head = "📡 내 종목·아침 후보 스파이크" if any("🌅" in x["line"] for x in mine_sigs) else "📡 내 종목 스파이크"
-        send(compose(f"{head} {ts}", mine_sigs, with_theme=False))
+        mine_msg = send(compose(f"{head} {ts}", mine_sigs, with_theme=False))
+    else:
+        mine_msg = None
+    try:   # 사유 분석(답글) — 실패해도 스파이크 알림에는 영향 없음. 신호가 없는 회차에도 재확인 대기분을 처리한다
+        reason_followups(mine_sigs, mine_msg, day, ts, now)
+    except Exception as e:
+        print(f"[warn] 사유 분석 단계 실패: {type(e).__name__}: {e}")
 
     # 시장 스캔분은 큐에 모았다가 DIGEST_MIN분 주기로 묶음 발송 (같은 종목은 최신 줄로 통합)
     pending_path = STATE_DIR / f"pending_{day}.json"
