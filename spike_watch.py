@@ -637,6 +637,9 @@ def reason_followups(mine_sigs, msg_id, day, ts, now):
             continue
         st["done"][key] = ts
         try:
+            if spike_reason.recently_listed(sig["code"]):   # 신규상장주는 사유 분석 생략(11/12)
+                print(f"{ts} 사유 분석 생략(신규상장) {sig['name']}")
+                continue
             shown = WHY_SHOWN.get(sig["code"], "")   # 알림에 이미 붙은 기사 제목
             res = spike_reason.analyze(sig["code"], sig["name"], sig["dir"], sig["note"], shown=shown)
             print(f"{ts} 사유 분석 {sig['name']} found={res['found']} model={res['model']} dup={res.get('dup', False)}")
