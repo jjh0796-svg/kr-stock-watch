@@ -80,6 +80,21 @@ def _keys() -> dict:
 NEW_LISTING_DAYS = 20     # 상장 후 이 거래일 수 안이면 사유 분석 생략(11/12) — 신규상장주는 재료 없이도 크게 움직인다
 
 
+def is_listing_day(code: str) -> bool:
+    """오늘이 상장 첫날인지 — 최근 두 달 일봉에 오늘 것만 있으면 첫날. 조회 실패·빈 응답은 False."""
+    try:
+        end = datetime.datetime.now(KST).date()
+        start = end - datetime.timedelta(days=60)
+        r = requests.get("https://api.finance.naver.com/siseJson.naver",
+                         params={"symbol": code, "requestType": 1, "startTime": start.strftime("%Y%m%d"),
+                                 "endTime": end.strftime("%Y%m%d"), "timeframe": "day"}, headers=UA, timeout=8)
+        rows = json.loads(r.text.replace("'", '"').replace(chr(10), ""))[1:]
+        today = end.strftime("%Y%m%d")
+        return bool(rows) and all(str(row[0]) == today for row in rows)
+    except Exception:
+        return False
+
+
 def recently_listed(code: str) -> bool:
     """최근 두 달 일봉이 NEW_LISTING_DAYS개 미만이면 신규상장주로 본다. 조회 실패는 False(평소대로 분석)."""
     try:

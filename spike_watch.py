@@ -42,6 +42,11 @@ UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 LEVELS_MINE = (5, 10, 15, 20, 25)     # T1 등락률 단계(%) — 내 종목(⭐💼🌅)
 LEVELS_MARKET = (10, 15, 20, 25)      # 시장 종목
 LIMIT_RATE = 29.5                     # 이 이상이면 상한가/하한가 단계(가격제한폭 ±30%)
+# 상장 첫날은 공모가 기준 -40% ~ +300%(공모가의 60~400%)가 가격제한폭이다(11/12 넥스아이 -29.5%를 하한가로 잘못 표기)
+LISTING_UP_LEVELS = (30, 50, 100, 150, 200, 250)
+LISTING_DOWN_LEVELS = (30, 35)
+LISTING_UP_LIMIT = 299.5
+LISTING_DOWN_LIMIT = 39.5
 VOL_MULT = 3.0        # T2: 20일 평균 거래량 대비 배수
 RANK_N = 20           # 등락 상위/하위 각 종목 수
 AMOUNT_N = 20         # 거래대금 상위 스캔 종목 수 (시장별) — 2026-09-01 추가
@@ -655,14 +660,38 @@ def reason_followups(mine_sigs, msg_id, day, ts, now):
     save_json(path, st)
 
 
-def level_steps(rate, mine):
-    """등락률 rate(%)가 이미 넘은 단계 라벨 목록(낮은 단계부터). 예: +16.2%, 시장 → ["+10%", "+15%"]."""
+def level_steps(rate, mine, listing=False):
+    """등락률 rate(%)가 이미 넘은 단계 라벨 목록(낮은 단계부터). 예: +16.2%, 시장 → ["+10%", "+15%"].
+    listing=True(상장 첫날)이면 ±30%에서 끝나지 않고 +300%/-40%까지 단계를 잇는다."""
     levels = LEVELS_MINE if mine else LEVELS_MARKET
     sign = "+" if rate > 0 else "-"
     out = [f"{sign}{lv}%" for lv in levels if abs(rate) >= lv]
+    if listing:
+        extra = LISTING_UP_LEVELS if rate > 0 else LISTING_DOWN_LEVELS
+        out += [f"{sign}{lv}%" for lv in extra if abs(rate) >= lv]
+        if abs(rate) >= (LISTING_UP_LIMIT if rate > 0 else LISTING_DOWN_LIMIT):
+            out.append("상한가" if rate > 0 else "하한가")
+        return out
     if abs(rate) >= LIMIT_RATE:
         out.append("상한가" if rate > 0 else "하한가")
     return out
+
+
+_LISTING_CACHE = {}
+
+
+def listing_day(code, day):
+    """오늘이 이 종목의 상장 첫날인지(하루 1회만 조회해 파일에 기억). 조회 실패는 False."""
+    if not _LISTING_CACHE:
+        _LISTING_CACHE.update(load_json(STATE_DIR / f"listing_{day}.json", {}))
+    if code not in _LISTING_CACHE:
+        try:
+            import spike_reason
+            _LISTING_CACHE[code] = bool(spike_reason.is_listing_day(code))
+        except Exception:
+            _LISTING_CACHE[code] = False
+        save_json(STATE_DIR / f"listing_{day}.json", _LISTING_CACHE)
+    return _LISTING_CACHE[code]
 
 
 def tick():
@@ -739,8 +768,14 @@ def tick():
         s = sent.get(code, {})
 
         # T1 등락률 단계 돌파 — 전일 종가 대비 등락률이 새 단계를 넘을 때만(단계당 하루 1회)
-        steps = level_steps(rate, mine)
+        # 상장 첫날 여부는 ±25%를 넘은 종목만 확인(조회 최소화) — 첫날이면 가격제한폭이 -40%~+300%
+        first_day = abs(rate) >= 25 and listing_day(code, day)
+        steps = level_steps(rate, mine, listing=first_day)
         done = dict(s.get("lv") or {})
+        if first_day and "하한가" in done and rate > -LISTING_DOWN_LIMIT:
+            done.pop("하한가")      # 예전 기준(±30%)으로 잘못 찍힌 표시는 지운다
+        if first_day and "상한가" in done and rate < LISTING_UP_LIMIT:
+            done.pop("상한가")
         new = [x for x in steps if x not in done]
         if new:
             for x in new:
@@ -755,6 +790,7 @@ def tick():
                 "code": code, "name": name, "sec": direction, "dir": direction,
                 "key": abs(rate), "mine": mine,
                 "line": f"{tag} {name} {head} · 현재 {rate:+.1f}% · {price:,.0f}원"
+                        + (" · 상장 첫날(공모가 대비, 제한폭 -40%~+300%)" if first_day else "")
                         + (f" ({path})" if len(shown) > 1 else ""),
                 "note": head,
             })
