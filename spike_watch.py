@@ -450,6 +450,9 @@ def liquid_ok(q, now):
     return q.get("value", 0) >= MIN_VALUE_FULLDAY * frac
 
 
+WHY_SHOWN = {}   # 이번 실행에서 알림에 붙여 보낸 기사 제목 {종목코드: 제목} — 사유 분석 중복 방지용
+
+
 def why_line(code, name=""):
     """신호 종목의 '왜' — 오늘자 종목뉴스 중 종목명이 들어간 기사를 우선, 없으면
     시황성 기사(코스피·증시·마감 등 종목 무관)를 뺀 첫 기사. 마땅치 않으면 ''."""
@@ -471,6 +474,7 @@ def why_line(code, name=""):
             pick = next((t for t in titles if not macro.search(t)), None)
         if not pick:
             return ""
+        WHY_SHOWN[code] = pick
         if len(pick) > 46:
             pick = pick[:46] + "…"
         return f"   └ 📰 {pick}"
@@ -617,8 +621,8 @@ def reason_followups(mine_sigs, msg_id, day, ts, now):
             keep.append(p)
             continue
         try:
-            res = spike_reason.analyze(p["code"], p["name"], p["dir"], p["move"])
-            print(f"{ts} 사유 재확인 {p['name']} found={res['found']} model={res['model']}")
+            res = spike_reason.analyze(p["code"], p["name"], p["dir"], p["move"], shown=p.get("shown", ""))
+            print(f"{ts} 사유 재확인 {p['name']} found={res['found']} model={res['model']} dup={res.get('dup', False)}")
             if res["found"]:
                 send([res["text"]], reply_to=p.get("msg"))
         except Exception as e:
@@ -633,14 +637,16 @@ def reason_followups(mine_sigs, msg_id, day, ts, now):
             continue
         st["done"][key] = ts
         try:
-            res = spike_reason.analyze(sig["code"], sig["name"], sig["dir"], sig["note"])
-            print(f"{ts} 사유 분석 {sig['name']} found={res['found']} model={res['model']}")
+            shown = WHY_SHOWN.get(sig["code"], "")   # 알림에 이미 붙은 기사 제목
+            res = spike_reason.analyze(sig["code"], sig["name"], sig["dir"], sig["note"], shown=shown)
+            print(f"{ts} 사유 분석 {sig['name']} found={res['found']} model={res['model']} dup={res.get('dup', False)}")
             if res["found"]:
                 send([res["text"]], reply_to=msg_id)
             else:
-                send([spike_reason.not_found_text(sig["name"], sig["dir"])], reply_to=msg_id)
+                if not shown:   # 기사 제목이 이미 붙어 나갔으면 '미확인' 답글도 생략(11/12)
+                    send([spike_reason.not_found_text(sig["name"], sig["dir"])], reply_to=msg_id)
                 st["pending"].append({"code": sig["code"], "name": sig["name"], "dir": sig["dir"],
-                                      "move": sig["note"], "ts": ts, "msg": msg_id})
+                                      "move": sig["note"], "ts": ts, "msg": msg_id, "shown": shown})
         except Exception as e:
             print(f"[warn] 사유 분석 실패 {sig['name']}: {type(e).__name__}")
     save_json(path, st)

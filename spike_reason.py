@@ -35,8 +35,30 @@ PROMPT = """너는 한국 주식 개인투자자의 보조다. 아래는 {name}(
   임상·허가, 규제·정책, 증권사 목표가·투자의견, 고객사·경쟁사 뉴스, 같은 업종 동반 급등락의 원인, 기사에 적힌 급등락 이유.
   회의 소집·수상·인증·사회공헌·인사·일반 홍보처럼 주가를 크게 움직이기 어려운 소식뿐이면 found=false.
 
+{shown_rule}
 재료:
 {items}"""
+
+SHOWN_RULE = """- 스파이크 알림에는 이미 이 기사 제목이 붙어 나갔다: "{shown}"
+  이 제목만 읽어도 알 수 있는 내용을 되풀이하지 마라. 그 제목 말고 다른 재료에서 나온 추가 사유가 없으면 found=false.
+"""
+
+
+def _norm(t: str) -> str:
+    return re.sub(r"[^0-9A-Za-z가-힣]", "", t or "")
+
+
+def same_story(a: str, b: str) -> bool:
+    """두 제목이 같은 기사(또는 받아쓴 기사)인지 — 앞 30자 일치 또는 두 글자 조각 겹침 60% 이상."""
+    a, b = _norm(a), _norm(b.rstrip("…"))
+    if not a or not b:
+        return False
+    n = min(len(a), len(b), 30)
+    if n >= 12 and a[:n] == b[:n]:
+        return True
+    ga = {a[i:i + 2] for i in range(len(a) - 1)}
+    gb = {b[i:i + 2] for i in range(len(b) - 1)}
+    return bool(ga and gb) and len(ga & gb) / min(len(ga), len(gb)) >= 0.6
 
 
 def enabled() -> bool:
@@ -182,9 +204,17 @@ def _grounded(line: str, blob: str) -> bool:
     return True
 
 
-def analyze(code: str, name: str, direction: str, move: str, now: datetime.datetime | None = None) -> dict:
-    """→ {'found': bool, 'text': 발송할 글 또는 '', 'model': 모델명}"""
+def analyze(code: str, name: str, direction: str, move: str, now: datetime.datetime | None = None,
+            shown: str = "") -> dict:
+    """→ {'found': bool, 'text': 발송할 글 또는 '', 'model': 모델명, 'dup': 알림에 붙은 제목과 겹쳐 생략했는지}
+    shown = 스파이크 알림에 이미 붙여 보낸 기사 제목(11/12 중복 방지). 재료가 그 기사뿐이면 AI를 부르지 않는다."""
     items = gather(code, name, now)
+    if shown and items and all(same_story(it["title"], shown) for it in items):
+        return {"found": False, "model": "", "text": "", "dup": True}
+    # 붙어 나간 제목이 이 종목을 직접 다룬 기사(종목명 포함·시황 아님)면 사유는 이미 전달된 것 → AI 생략.
+    # 단, 당일 공시가 있으면 제목에 없는 재료일 수 있어 분석한다.
+    if shown and name in shown and not _MACRO.search(shown) and not any(it["kind"] == "공시" for it in items):
+        return {"found": False, "model": "", "text": "", "dup": True}
     dir_word = "상승" if direction == "up" else "하락"
     icon = "🧠"
     head = f"{icon} {name} {dir_word} 사유 (AI 추정 · 당일 뉴스·공시 기준)"
@@ -192,7 +222,8 @@ def analyze(code: str, name: str, direction: str, move: str, now: datetime.datet
         return {"found": False, "model": "", "text": ""}
     listing = "\n".join(f"{n}. [{it['kind']} {it['time']}] {it['title']}" + (f" — {it['body']}" if it["body"] else "")
                         for n, it in enumerate(items, 1))
-    data, model = _ask(PROMPT.format(name=name, code=code, move=move, dir_word=dir_word, items=listing))
+    rule = SHOWN_RULE.format(shown=shown.replace('"', "'")) if shown else ""
+    data, model = _ask(PROMPT.format(name=name, code=code, move=move, dir_word=dir_word, items=listing, shown_rule=rule))
     if not data or not data.get("found"):
         return {"found": False, "model": model, "text": ""}
     blob = listing
@@ -201,13 +232,17 @@ def analyze(code: str, name: str, direction: str, move: str, now: datetime.datet
     if not lines:
         return {"found": False, "model": model, "text": ""}
     basis = []
+    used = []
     for b in data.get("basis") or []:
         try:
             it = items[int(b) - 1]
         except (TypeError, ValueError, IndexError):
             continue
+        used.append(it)
         t = it["title"] if len(it["title"]) <= 44 else it["title"][:44] + "…"
         basis.append(f"   └ {'📄' if it['kind'] == '공시' else '📰'} {it['time']} {t}")
+    if shown and used and all(same_story(it["title"], shown) for it in used):   # 근거가 이미 붙은 그 기사뿐 → 되풀이
+        return {"found": False, "model": model, "text": "", "dup": True}
     out = [head] + [f"• {x}" for x in lines] + basis[:2]
     return {"found": True, "model": model, "text": "\n".join(out)}
 
