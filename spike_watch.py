@@ -367,6 +367,14 @@ def fetch_amount_rank():
     return codes
 
 
+def _num(value):
+    """'1,234' → 1234.0. 아직 거래가 없거나 거래가 정지된 종목은 값이 '-'로 온다 → 0."""
+    try:
+        return float(str(value).replace(",", "") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def fetch_quotes(codes):
     """네이버 폴링 API 배치 시세. 반환 {code: {name, price, rate, volume}}"""
     out = {}
@@ -379,9 +387,11 @@ def fetch_quotes(codes):
             r.raise_for_status()
             for d in r.json().get("datas", []):
                 code = d.get("itemCode", "")
-                price = float(str(d.get("closePrice", "0")).replace(",", "") or 0)
-                rate = float(str(d.get("fluctuationsRatio", "0")).replace(",", "") or 0)
-                vol = float(str(d.get("accumulatedTradingVolume", "0")).replace(",", "") or 0)
+                # 숫자는 종목별로 안전하게 읽는다 — 한 종목의 거래량이 '-'(개장 직후 무거래·거래정지)면
+                # 예전에는 변환 오류로 같은 묶음 30종목이 통째로 빠졌다(11/16)
+                price = _num(d.get("closePrice", "0"))
+                rate = _num(d.get("fluctuationsRatio", "0"))
+                vol = _num(d.get("accumulatedTradingVolume", "0"))
                 try:
                     value = float(d.get("accumulatedTradingValueRaw") or 0)   # 당일 누적 거래대금(원)
                     mcap = float(d.get("marketValueFullRaw") or 0)            # 시가총액(원)

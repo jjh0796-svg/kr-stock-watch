@@ -117,6 +117,23 @@ def test_wrong_numeric_code_never_registers_a_lookalike(tmp_path, monkeypatch):
     assert wb.read_hd() == {}
 
 
+def test_quotes_survive_a_stock_without_trades(monkeypatch):
+    """한 종목의 거래량이 '-'(개장 직후 무거래·거래정지)여도 같은 묶음의 다른 종목 시세는 읽는다."""
+    datas = [
+        {"itemCode": "0013Y0", "stockName": "엠에스바이오", "closePrice": "5,510", "fluctuationsRatio": "-1.78",
+         "accumulatedTradingVolume": "650,097", "accumulatedTradingValueRaw": "3600000000", "marketValueFullRaw": "120000000000"},
+        {"itemCode": "950260", "stockName": "거래 없는 종목", "closePrice": "1,000", "fluctuationsRatio": "0.00",
+         "accumulatedTradingVolume": "-", "accumulatedTradingValueRaw": None, "marketValueFullRaw": None},
+        {"itemCode": "000001", "stockName": "값 없는 종목", "closePrice": "-", "fluctuationsRatio": "-", "accumulatedTradingVolume": "-"},
+    ]
+    monkeypatch.setattr(sw.requests, "get", lambda url, **kw: _Resp({"datas": datas}))
+    quotes = sw.fetch_quotes(["0013Y0", "950260", "000001"])
+    assert quotes["0013Y0"] == {"name": "엠에스바이오", "price": 5510.0, "rate": -1.78, "volume": 650097.0,
+                                "value": 3.6e9, "mcap": 1.2e11}
+    assert quotes["950260"]["price"] == 1000.0 and quotes["950260"]["volume"] == 0.0
+    assert "000001" not in quotes        # 가격이 없는 종목만 빠진다
+
+
 def test_spike_watch_reads_alnum_codes(tmp_path, monkeypatch):
     hf, wf = tmp_path / "holdings.csv", tmp_path / "watchlist.csv"
     hf.write_text("394420,리센스메디컬\n0013y0,엠에스바이오\n12345,자릿수 부족\nABCDEF,코드 아님\n", encoding="utf-8")
