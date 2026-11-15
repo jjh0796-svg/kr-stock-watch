@@ -23,6 +23,7 @@
 import argparse
 import datetime
 import json
+import re
 import subprocess
 import os
 import sys
@@ -86,6 +87,17 @@ def save_json(path, obj):
     path.write_text(json.dumps(obj, ensure_ascii=False), encoding="utf-8")
 
 
+# 국내 종목코드 = 6자리. 숫자만이 아니라 영문이 섞인 코드도 있다 — 2024년 이후 신규 상장주(0013Y0)·일부 우선주(00104K).
+# 예전에는 숫자만 종목으로 읽어서, 이런 종목은 보유·관심 목록에 있어도 감시에서 빠졌다(11/16 수정, watch_bot과 같은 규칙).
+CODE_RE = re.compile(r"[0-9][0-9A-Z]{5}")
+
+
+def norm_code(text):
+    """종목코드면 대문자 6자리로, 아니면 ''."""
+    code = str(text or "").strip().upper()
+    return code if CODE_RE.fullmatch(code) else ""
+
+
 def read_watchlist():
     out = {}
     path = BASE_DIR / "watchlist.csv"
@@ -95,14 +107,14 @@ def read_watchlist():
             if not line or line.startswith("#"):
                 continue
             parts = line.split(",")
-            if len(parts) >= 2 and parts[0].strip().isdigit():
-                out[parts[0].strip()] = parts[1].strip()
+            if len(parts) >= 2 and norm_code(parts[0]):
+                out[norm_code(parts[0])] = parts[1].strip()
     # 비공개 관심종목: env WATCHLIST="005930:삼성전자,000660:SK하이닉스" (daily_scan과 동일 형식)
     for item in os.environ.get("WATCHLIST", "").split(","):
         if ":" in item:
             code, _, name = item.strip().partition(":")
-            if code.strip().isdigit():
-                out[code.strip()] = name.strip()
+            if norm_code(code):
+                out[norm_code(code)] = name.strip()
     # 대화형 봇(watch_bot)이 관리하는 동적 관심종목 파일 ("코드,이름" 줄 단위)
     wf = Path(os.environ.get("WATCHLIST_FILE",
                              str(Path.home() / "bots" / "watchlist.csv")))
@@ -110,8 +122,8 @@ def read_watchlist():
         for line in wf.read_text(encoding="utf-8-sig").splitlines():
             if "," in line:
                 code, _, name = line.partition(",")
-                if code.strip().isdigit():
-                    out[code.strip()] = name.strip()
+                if norm_code(code):
+                    out[norm_code(code)] = name.strip()
     return out
 
 
@@ -319,8 +331,8 @@ def read_holdings():
         for line in hf.read_text(encoding="utf-8-sig").splitlines():
             if "," in line:
                 code, _, name = line.partition(",")
-                if code.strip().isdigit():
-                    out[code.strip()] = name.strip()
+                if norm_code(code):
+                    out[norm_code(code)] = name.strip()
     return out
 
 

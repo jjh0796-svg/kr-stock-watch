@@ -14,6 +14,7 @@
 - 운영: systemd 상주 서비스 (긴 폴링, 죽으면 자동 재시작)
 """
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -26,6 +27,22 @@ for _s in (sys.stdout, sys.stderr):
 
 BASE_DIR = Path(__file__).resolve().parent
 UA = {"User-Agent": "Mozilla/5.0"}
+
+# 국내 종목코드 = 6자리. 숫자만(005930)이 아니라 영문이 섞인 코드도 있다 —
+# 2024년 이후 신규 상장주(0013Y0 엠에스바이오·0053F0 티앤이코리아·0126Z0 삼성에피스홀딩스)와 일부 우선주(00104K).
+# 예전에는 숫자 6자리만 종목으로 봐서 이런 종목은 이름으로도 코드로도 등록이 안 됐다(11/9 사용자 지적).
+CODE_RE = re.compile(r"[0-9][0-9A-Z]{5}")
+
+
+def norm_code(text):
+    """종목코드면 대문자 6자리로, 아니면 ''."""
+    code = str(text or "").strip().upper()
+    return code if CODE_RE.fullmatch(code) else ""
+
+
+def _key(text):
+    """이름 비교용 — 띄어쓰기·대소문자 차이를 없앤다(sk하이닉스 = SK하이닉스)."""
+    return str(text or "").replace(" ", "").upper()
 
 
 def load_env():
@@ -53,8 +70,9 @@ def _read_csv(path):
         for line in path.read_text(encoding="utf-8-sig").splitlines():
             if "," in line:
                 code, _, name = line.partition(",")
-                if code.strip().isdigit():
-                    out[code.strip()] = name.strip()
+                code = norm_code(code)
+                if code:
+                    out[code] = name.strip()
     return out
 
 
@@ -95,41 +113,53 @@ def resolve_name(code):
 
 
 def search_stock(query):
-    """종목명(부분명 가능) → [(code, name)] 후보. 네이버 자동완성, 국내 종목만."""
+    """종목명(부분명 가능)·코드 → [(code, name)] 후보. 네이버 자동완성, 국내 종목만.
+    조회 자체가 실패하면 None — '없는 종목'과 '검색이 안 된 것'을 구분해 안내하기 위해서다."""
     try:
         r = requests.get("https://ac.stock.naver.com/ac",
                          params={"q": query, "target": "stock,ipo"},
                          headers=UA, timeout=10)
+        r.raise_for_status()
         out = []
         for it in r.json().get("items", []):
-            code, name = it.get("code", ""), it.get("name", "")
-            if it.get("nationCode") == "KOR" and len(code) == 6 and code.isdigit():
+            code, name = norm_code(it.get("code", "")), str(it.get("name", "")).strip()
+            if it.get("nationCode") == "KOR" and code and name:
                 out.append((code, name))
         return out
-    except Exception:
-        return []
+    except Exception as e:
+        print(f"[warn] 종목 검색 실패: {type(e).__name__}")
+        return None
 
 
 def parse_target(args, usage):
-    """추가 명령 인자 → (code, name, 오류문). 6자리 코드 또는 종목명 허용."""
+    """추가 명령 인자 → (code, name, 오류문). 종목코드(숫자 6자리·영문 섞인 6자리) 또는 종목명 허용."""
     if not args:
         return None, None, usage
-    if args[0].isdigit() and len(args[0]) == 6:
-        code = args[0]
-        name = " ".join(args[1:]) if len(args) > 1 else resolve_name(code)
-        if not name:
-            return None, None, f"❓ {code} 종목명을 찾지 못했습니다. 코드 뒤에 이름을 함께 적어주세요."
-        return code, name, None
+    code = norm_code(args[0])
+    if code:
+        name = " ".join(args[1:]).strip() or resolve_name(code)
+        if name:
+            return code, name, None
+        # 시세 조회로 이름을 못 얻었다 → 아래 검색으로 한 번 더 찾는다(영문이 섞인 6자는 종목명일 수도 있다)
+    no_code = (f"❓ {code} 종목을 찾지 못했습니다. 코드를 다시 확인해 주세요.\n"
+               f"코드가 맞다면 뒤에 이름을 함께 적으면 등록됩니다 (예: {code} 종목명).")
     query = " ".join(args)
     cands = search_stock(query)
+    if cands is None:
+        return None, None, "⚠️ 종목 검색이 지금 응답하지 않습니다. 잠시 뒤 다시 보내 주세요."
     if not cands:
-        return None, None, f"❓ '{query}' 매칭 종목을 찾지 못했습니다. 6자리 코드로 시도해주세요."
-    norm = query.replace(" ", "")
-    exact = [c for c in cands if c[1].replace(" ", "") == norm]
+        if code:
+            return None, None, no_code
+        return None, None, (f"❓ '{query}' 종목을 찾지 못했습니다. 이름을 다시 확인하거나 종목코드로 입력해 주세요.\n"
+                            "(예: 005930 · 신규 상장주는 0013Y0처럼 영문이 섞인 코드)")
+    norm = _key(query)
+    exact = [c for c in cands if _key(c[1]) == norm or c[0] == norm]
     if exact:
         return exact[0][0], exact[0][1], None
+    if code and code.isdigit():   # 숫자 코드를 넣었는데 그 코드가 후보에 없으면 비슷한 다른 종목을 대신 등록하지 않는다
+        return None, None, no_code
     # 첫 후보명에 검색어가 들어 있으면 자동 채택, 아니면 후보 제시
-    if norm in cands[0][1].replace(" ", "") or len(cands) == 1:
+    if norm in _key(cands[0][1]) or len(cands) == 1:
         return cands[0][0], cands[0][1], None
     lines = [f"· {n} ({c})" for c, n in cands[:4]]
     return None, None, f"❓ '{query}' 후보가 여럿입니다. 코드로 다시 시도해주세요:\n" + "\n".join(lines)
@@ -137,10 +167,11 @@ def parse_target(args, usage):
 
 def find_in(book, key):
     """저장 목록에서 코드 또는 이름(부분일치)으로 찾기 → 코드 or None."""
-    if key in book:
-        return key
-    norm = key.replace(" ", "")
-    hits = [c for c, n in book.items() if norm and norm in n.replace(" ", "")]
+    code = norm_code(key)
+    if code and code in book:
+        return code
+    norm = _key(key)
+    hits = [c for c, n in book.items() if norm and norm in _key(n)]
     return hits[0] if len(hits) == 1 else None
 
 
@@ -154,7 +185,9 @@ HELP = (
     "/스파이크추가 005930 또는 종목명 · /스파이크삭제 · /스파이크목록  (영문: /spike /spike_del /spikes)\n"
     "\n"
     "📢 공시감시(DART)는 별도 봇: '안녕하재 공시모니터링'\n"
-    "→ @filingsmonitor_0796_bot 에서 /추가·/목록·/유형 등 사용"
+    "→ @filingsmonitor_0796_bot 에서 /추가·/목록·/유형 등 사용\n"
+    "\n"
+    "종목은 이름이나 코드로 적습니다. 신규 상장주처럼 코드에 영문이 섞인 종목(예: 0013Y0)도 됩니다."
 )
 
 
