@@ -13,6 +13,7 @@
 - 보안: WATCH_ADMIN_CHAT_ID(없으면 TELEGRAM_CHAT_ID)로 지정된 대화만 응답 (그 외 무시)
 - 운영: systemd 상주 서비스 (긴 폴링, 죽으면 자동 재시작)
 """
+import json
 import os
 import re
 import sys
@@ -294,6 +295,26 @@ def register_menu(token):
         print(f"[TG] setMyCommands 실패: {e}")
 
 
+def reaction_row(rc):
+    """채널 글의 반응 수(익명 집계) → 장부 한 줄. CODEX tools/reaction_report 가 주간 집계에 쓴다."""
+    counts = {}
+    for item in rc.get("reactions") or []:
+        kind = item.get("type") or {}
+        counts[kind.get("emoji") or kind.get("custom_emoji_id") or kind.get("type") or "?"] = item.get("total_count", 0)
+    return {"chat": (rc.get("chat") or {}).get("id"), "message_id": rc.get("message_id"),
+            "date": rc.get("date"), "reactions": counts}
+
+
+def record_reaction(rc):
+    try:
+        path = Path(os.environ.get("REACTION_LEDGER", str(Path.home() / "bots" / "reactions.jsonl")))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(reaction_row(rc), ensure_ascii=False) + "\n")
+    except Exception as e:      # 기록 실패가 대화봇을 멈추면 안 된다
+        print(f"[warn] 반응 기록 실패: {type(e).__name__}")
+
+
 def main():
     load_env()
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -305,13 +326,18 @@ def main():
     offset = 0
     register_menu(token)
     print("watch_bot 시작")
+    # 11/16: 대화 명령 말고도 종목모니터링방 글에 달린 반응 수(👍·👎 주간 집계용)를 받는다
+    wanted = json.dumps(["message", "message_reaction_count"])
     while True:
         try:
             r = requests.get(f"{api}/getUpdates",
-                             params={"offset": offset, "timeout": 50},
+                             params={"offset": offset, "timeout": 50, "allowed_updates": wanted},
                              timeout=60).json()
             for u in r.get("result", []):
                 offset = u["update_id"] + 1
+                if u.get("message_reaction_count"):
+                    record_reaction(u["message_reaction_count"])
+                    continue
                 msg = u.get("message") or {}
                 chat_id = str((msg.get("chat") or {}).get("id", ""))
                 text = msg.get("text", "")
