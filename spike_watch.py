@@ -671,10 +671,28 @@ def send(lines, reply_to=None):
         if r.status_code != 200:
             print(f"send 실패 HTTP {r.status_code}: {r.text[:150]}")
             return None
-        return (r.json().get("result") or {}).get("message_id")
+        message_id = (r.json().get("result") or {}).get("message_id")
+        _ops_record(chat, message_id, text, token)
+        return message_id
     except Exception as e:
         print(f"send 예외: {e}")
         return None
+
+
+def _ops_record(chat, message_id, text, token):
+    """봇운영실의 '오늘의 한 장'·산출물 점검(CODEX tools.monitor_store)에 발송 기록을 남긴다(11/16). 실패는 무해.
+    예전에는 이 봇의 글이 기록부 밖이라, 거래량 알림이 두 달 사라져도 점검에 걸리지 않았다."""
+    try:
+        if not message_id:
+            return
+        import sys
+        codex = os.environ.get("CODEX_DIR", str(Path.home() / "codex"))
+        if codex not in sys.path:
+            sys.path.insert(0, codex)
+        from tools.monitor_store import record_message
+        record_message(chat, message_id, text, bot=str(token).split(":")[0], job=os.environ.get("HAJAE_JOB") or "spike_tick")
+    except Exception:
+        pass
 
 
 def reason_followups(mine_sigs, msg_id, day, ts, now):
