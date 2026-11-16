@@ -7,7 +7,8 @@
   T1 등락률 단계 돌파(2026-11-06 개편): 전일 종가(거래소 기준가) 대비 등락률이 단계를 처음 넘을 때 1회
      내 종목 ±5·10·15·20·25%·상/하한가, 시장 종목 ±10·15·20·25%·상/하한가 (예전 5분 ±3%·상위진입 ±7%·재알림 상한 폐지)
   T2 거래량: 당일 누적 거래량이 20일 평균의 300% 돌파 (워치리스트만)
-  T2b 거래량 폭발: 거래대금 상위 종목이 당일 누적 20일 평균 3배 돌파 (시장 전체 입구)
+  T2b 거래량 폭발: 거래대금 상위(시장별 주식 20종목) 종목이 당일 누적 20일 평균 3배 돌파 (시장 전체 입구)
+     — 네이버 모바일 순위 priceTop. 9/11~11/16은 옛 PC 화면 주소가 막혀 멈춰 있었다(11/16 복구)
   T3 52주 신고가/신저가 터치 (워치리스트만)
 - 노이즈 억제: 종목·트리거당 1일 1회, T1 재알림은 직전 알림가 대비 추가 ±3%시.
   장 시작 직후(09:00~09:05) 제외, 폴링 매분 09:05~15:30.
@@ -51,6 +52,8 @@ LISTING_DOWN_LIMIT = 39.5
 VOL_MULT = 3.0        # T2: 20일 평균 거래량 대비 배수
 RANK_N = 20           # 등락 상위/하위 각 종목 수
 AMOUNT_N = 20         # 거래대금 상위 스캔 종목 수 (시장별) — 2026-09-01 추가
+AMOUNT_FETCH = 60     # 거래대금 순위는 ETF가 섞여 오므로 넉넉히 받아 주식만 AMOUNT_N개 고른다
+AVG_LOOKUPS = 15      # 20일 평균 거래량 조회는 한 회차에 이만큼만(나머지는 다음 분에)
 
 # 실전성 개편 (2026-09-18): 시장 스캔분은 매매 가능한 종목만, 5분 묶음으로
 MIN_MKTCAP = 1e11         # 시장 스캔분 시총 하한 1,000억 (⭐관심·💼보유는 면제) — 사용자 지정 9/19
@@ -338,11 +341,11 @@ def read_holdings():
 
 # ------------------------------------------------------------------ 수집
 
-def fetch_rank(sort, market):
-    """네이버 등락률 상위/하위. sort: up|down, market: KOSPI|KOSDAQ"""
+def fetch_rank(sort, market, n=RANK_N, page=1):
+    """네이버 모바일 순위. sort: up(상승률)|down(하락률)|priceTop(거래대금), market: KOSPI|KOSDAQ"""
     url = f"https://m.stock.naver.com/api/stocks/{sort}/{market}"
     try:
-        r = requests.get(url, params={"page": 1, "pageSize": RANK_N},
+        r = requests.get(url, params={"page": page, "pageSize": n},
                          headers=UA, timeout=10)
         r.raise_for_status()
         return r.json().get("stocks", [])
@@ -352,19 +355,53 @@ def fetch_rank(sort, market):
 
 
 def fetch_amount_rank():
-    """네이버 PC 거래대금 상위(코스피 sosok=0·코스닥 1) → 종목코드 집합.
-    모바일 API에는 거래대금 정렬이 없어 PC 페이지에서 코드만 뽑는다(이름·시세는 quotes로)."""
-    import re as _re
+    """거래대금 상위(코스피·코스닥 각 AMOUNT_N종목) → 종목코드 집합. ETF·ETN은 빼고 주식만.
+
+    네이버 모바일 순위의 거래대금 순(priceTop) — 등락률 순위(fetch_rank)와 같은 주소 계열이다(이름·시세는 quotes로).
+    11/16 이전에는 PC 화면(finance.naver.com/sise/sise_quant_high.naver)에서 종목 링크를 긁었는데, 네이버가 그 주소를
+    새 사이트(stock.naver.com)로 돌려보내면서 9/11부터 빈 목록만 받았다 — '거래량 폭발' 알림이 두 달 동안 조용히 멈춤.
+    게다가 그 화면은 '거래대금 상위'가 아니라 '거래량 급증' 목록이었다. 이제 이름 그대로 거래대금 상위를 받는다.
+
+    실측(11/16): 코스피 상위 60줄 중 ETF·ETN이 26줄(주식 34줄), 코스닥은 전부 주식. 순서는 네이버가 수십 초 간격으로
+    다시 매겨 값과 조금 어긋날 수 있고, 개장 직후 1~2분은 명단이 덜 찬다(알림은 어차피 09:05부터)."""
     codes = set()
-    for sosok in ("0", "1"):
-        try:
-            r = requests.get("https://finance.naver.com/sise/sise_quant_high.naver",
-                             params={"sosok": sosok}, headers=UA, timeout=10)
-            found = _re.findall(r'/item/main\.naver\?code=(\d{6})', r.text)
-            codes.update(found[:AMOUNT_N])
-        except Exception as e:
-            print(f"[warn] amount rank sosok={sosok}: {e}")
+    for market in ("KOSPI", "KOSDAQ"):
+        picked = 0
+        for page in (1, 2):      # ETF가 첫 쪽을 많이 차지한 날은 둘째 쪽까지 본다
+            rows = fetch_rank("priceTop", market, AMOUNT_FETCH, page)
+            for s in rows:
+                code = norm_code(s.get("itemCode", ""))
+                name = str(s.get("stockName", ""))
+                if not code or s.get("stockEndType", "stock") != "stock" or any(k in name for k in ETF_KEYWORDS):
+                    continue
+                if code not in codes:
+                    codes.add(code)
+                    picked += 1
+                if picked >= AMOUNT_N:
+                    break
+            if picked >= AMOUNT_N or len(rows) < AMOUNT_FETCH:
+                break
     return codes
+
+
+def refresh_market_avg(amount_set, mvol, day, lookup=None):
+    """거래대금 상위 종목의 20일 평균 거래량 캐시를 오늘 것으로 채운다. 바뀐 게 있으면 True.
+
+    - 다른 날짜 것은 버린다(예전에는 버리지 않아 두 달 전 종목 1,000여 개가 그대로 쌓여 있었다).
+    - 한 번에 AVG_LOOKUPS종목까지만 조회한다 — 하루 첫 회차에 40종목을 한꺼번에 물으면 느린 날 1분 주기를 넘긴다.
+    - 조회가 안 된 종목(평균 0)은 다음 회차에 다시 묻되 하루 3번까지만(상장 첫날은 지난 일봉이 없어 계속 0)."""
+    lookup = lookup or naver_avg20
+    changed = False
+    for code in [c for c, v in mvol.items() if v.get("asof") != day]:
+        del mvol[code]
+        changed = True
+    todo = [c for c in sorted(amount_set)
+            if c not in mvol or (mvol[c].get("avg", 0) <= 0 and mvol[c].get("tries", 1) < 3)]
+    for code in todo[:AVG_LOOKUPS]:
+        tries = mvol.get(code, {}).get("tries", 0) + 1
+        mvol[code] = {"avg": lookup(code), "asof": day, "tries": tries}
+        changed = True
+    return changed
 
 
 def _num(value):
@@ -748,15 +785,14 @@ def tick():
                 code = s.get("itemCode", "")
                 if code:
                     ranked[code] = s
-    # 거래대금 상위 — "주가는 조용한데 거래량 폭발" 입구 (2026-09-01)
+    # 거래대금 상위 — "주가는 조용한데 거래량 폭발" 입구 (2026-09-01, 11/16 수집 경로 복구)
     amount_set = fetch_amount_rank()
+    if ranked and not amount_set and alerts_allowed(now) and now.minute % 10 == 0:
+        # 등락률 순위는 왔는데 거래대금 순위만 비었다 = 자료 주소가 바뀌었거나 막혔다. 9/11~11/16 두 달 동안
+        # 이 목록이 조용히 비어 있었던 일의 재발 방지 — 운영 점검(ops_watch)이 읽는 문구('수집 0건')로 남긴다.
+        print("[warn] 거래대금 상위 수집 0건 — 등락률 순위는 왔는데 거래대금 순위만 비어 있음(네이버 순위 자료 확인 필요)")
     mvol = load_json(STATE_DIR / "marketvol_cache.json", {})
-    dirty = False
-    for c in amount_set:
-        if mvol.get(c, {}).get("asof") != day:
-            mvol[c] = {"avg": naver_avg20(c), "asof": day}
-            dirty = True
-    if dirty:
+    if refresh_market_avg(amount_set, mvol, day):
         save_json(STATE_DIR / "marketvol_cache.json", mvol)
     universe = set(wl) | set(ranked) | amount_set
     quotes = fetch_quotes(universe)
@@ -819,10 +855,11 @@ def tick():
             mark(code, "lv", done)
 
         # T2b: 거래대금 상위 종목의 거래량 폭발 — 당일 누적이 20일 평균의 3배 이상
+        # (내 종목은 아래 T2와 같은 사건이라, 어느 한쪽이 먼저 나갔으면 다른 쪽은 보내지 않는다)
         mv = mvol.get(code, {}).get("avg", 0)
         if (code in amount_set and mv > 0 and q["volume"] >= VOL_MULT * mv
                 and not any(k in name for k in ETF_KEYWORDS)
-                and not s.get("t2m")):
+                and not s.get("t2m") and not (mine and s.get("t2"))):
             mult = q["volume"] / mv
             dot = "🔴" if rate > 0 else ("🔵" if rate < 0 else "⚪")
             signals.append({
@@ -838,7 +875,7 @@ def tick():
         if p and mine:
             # T2: 거래량 폭증 (당일 등락을 색으로 병기)
             if (p["avg20_vol"] > 0 and q["volume"] >= VOL_MULT * p["avg20_vol"]
-                    and not s.get("t2")):
+                    and not s.get("t2") and not sent.get(code, {}).get("t2m")):
                 mult = q["volume"] / p["avg20_vol"]
                 dot = "🔴" if rate > 0 else ("🔵" if rate < 0 else "⚪")
                 signals.append({
@@ -908,12 +945,14 @@ def tick():
     except Exception as e:
         print(f"[warn] 사유 분석 단계 실패: {type(e).__name__}: {e}")
 
-    # 시장 스캔분은 큐에 모았다가 DIGEST_MIN분 주기로 묶음 발송 (같은 종목은 최신 줄로 통합)
+    # 시장 스캔분은 큐에 모았다가 DIGEST_MIN분 주기로 묶음 발송 (같은 종목·같은 구역은 최신 줄로 통합)
+    # 구역(상승·하락·거래량)이 다르면 따로 둔다 — 예전에는 종목만 보고 덮어써서, 같은 5분 안에 단계 돌파와
+    # 거래량 폭발이 함께 나오면 한쪽 줄이 사라졌다(거래량 줄은 하루 1회라 한 번 덮이면 그날 다시 안 나옴).
     pending_path = STATE_DIR / f"pending_{day}.json"
     pending = load_json(pending_path, [])
     for sig in (x for x in signals if not x["mine"]):
         sig["ts"] = ts
-        pending = [p for p in pending if p["code"] != sig["code"]] + [sig]
+        pending = [p for p in pending if (p["code"], p.get("sec")) != (sig["code"], sig["sec"])] + [sig]
     closing = now.time() >= datetime.time(15, 29)
     if pending and (now.minute % DIGEST_MIN == 0 or closing):
         first = min(p.get("ts", ts) for p in pending)
