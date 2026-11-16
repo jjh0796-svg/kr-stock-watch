@@ -115,6 +115,48 @@ def test_own_stock_gets_one_volume_alert_not_two(tmp_path, monkeypatch):
     assert len(b.volume_lines()) == 1                     # 다음 회차에 다른 쪽 줄이 뒤늦게 나오지도 않는다
 
 
+def test_volume_line_is_skipped_when_a_step_alert_already_went_out(tmp_path, monkeypatch):
+    """'+10% 돌파' 같은 단계 알림이 이미 나간(또는 같은 회차에 나가는) 종목은 거래량 줄을 보내지 않는다.
+    이 알림은 '주가는 조용한데 거래만 터진 종목'용이다(11/16 복구 첫날 4건 중 3건이 이미 단계 알림이 나간 종목)."""
+    b = Bench(tmp_path, monkeypatch)
+    b.amount = {"111111", "222222", "333333"}
+    b.avg = {"111111": 1_000_000, "222222": 1_000_000, "333333": 1_000_000}
+    b.quotes = {"111111": quote("이미급등주", 12.0, 2_000_000),      # 10:01 +10% 돌파, 거래량은 아직 2배
+                "222222": quote("조용한주", -0.6, 4_400_000),         # 주가는 조용한데 거래량 4.4배
+                "333333": quote("동시주", 10.5, 3_500_000)}           # 같은 회차에 +10% 돌파와 거래량 3.5배
+    b.tick((10, 1))
+    b.quotes["111111"] = quote("이미급등주", 13.0, 3_300_000)        # 10:03 거래량이 3.3배가 됐지만 단계 알림이 먼저 나갔다
+    b.tick((10, 3))
+    b.tick((10, 5))
+    assert len(b.sent) == 1
+    msg = b.sent[0]
+    assert b.volume_lines() == ["· 조용한주 거래대금상위 · 거래량 x4.4 🔵-0.6% · 10,000원"]
+    assert "· 이미급등주 +10% 돌파 · 현재 +12.0% · 10,000원" in msg
+    assert "· 동시주 +10% 돌파 · 현재 +10.5% · 10,000원" in msg
+    b.quotes["111111"] = quote("이미급등주", 14.0, 9_000_000)
+    b.tick((10, 10))
+    assert len(b.volume_lines()) == 1                      # 그날 끝까지 거래량 줄은 나오지 않는다
+
+
+def test_own_stock_keeps_its_own_volume_line_after_a_step_alert(tmp_path, monkeypatch):
+    """내 종목은 단계 알림이 나갔어도 전용 거래량 알림(T2)이 그대로 온다 — 표시는 그 종목의 실제 구분(💼)."""
+    b = Bench(tmp_path, monkeypatch)
+    b.holdings = {"666666": "내보유주"}
+    b.amount = {"666666"}
+    b.avg = {"666666": 1_000_000}
+    b.state.mkdir(parents=True)
+    (b.state / f"prep_{DAY}.json").write_text(json.dumps(
+        {"666666": {"name": "내보유주", "avg20_vol": 1_000_000, "high52": 9e9, "low52": 0}}), encoding="utf-8")
+    b.quotes = {"666666": quote("내보유주", 6.0, 2_000_000)}          # +5% 돌파(내 종목 단계)
+    b.tick((10, 7))
+    assert b.volume_lines() == []
+    b.quotes["666666"] = quote("내보유주", 7.0, 3_200_000)            # 거래량 3.2배
+    b.tick((10, 8))
+    assert b.volume_lines() == ["💼 내보유주 거래량 x3.2 🔴+7.0%"]
+    b.tick((10, 9))
+    assert len(b.volume_lines()) == 1
+
+
 def test_step_line_and_volume_line_do_not_overwrite_each_other(tmp_path, monkeypatch):
     """같은 5분 안에 거래량 폭발(10:01)과 +10% 돌파(10:03)가 이어지면 두 줄 다 묶음에 남는다."""
     b = Bench(tmp_path, monkeypatch)
