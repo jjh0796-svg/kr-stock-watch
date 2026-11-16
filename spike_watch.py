@@ -59,7 +59,13 @@ AVG_LOOKUPS = 15      # 20일 평균 거래량 조회는 한 회차에 이만큼
 # 실전성 개편 (2026-09-18): 시장 스캔분은 매매 가능한 종목만, 5분 묶음으로
 MIN_MKTCAP = 1e11         # 시장 스캔분 시총 하한 1,000억 (⭐관심·💼보유는 면제) — 사용자 지정 9/19
 MIN_VALUE_FULLDAY = 2e9   # 거래대금 하한 — 종일 기준 20억, 장중엔 경과시간 비례(최소 20%)
-DIGEST_MIN = 5            # 시장 신호 묶음 발송 주기(분) — 내 종목 신호는 즉시
+# 시장 신호 묶음 발송 주기(분) — 내 종목 신호는 즉시.
+# 11/16 운용 개편 나-3: 5분 → 60분(정시마다 + 장 마감 직전). 5분 묶음이 주 375통쯤으로 방을 덮었고, 성과표에서
+# 시장 급등락 신호는 5거래일 뒤 평균 -3.9%(오른 경우 36%)였다. 예전처럼 하려면 환경변수 SPIKE_DIGEST_MIN=5.
+try:
+    DIGEST_MIN = max(1, int(os.environ.get("SPIKE_DIGEST_MIN") or 60))
+except ValueError:
+    DIGEST_MIN = 60
 
 
 # ------------------------------------------------------------------ 환경/상태
@@ -933,8 +939,9 @@ def tick():
                 out.append(f"… 외 {len(items) - n}건")
             return out
 
-        lines += section("🔴 상승 단계 돌파 (전일 종가 대비)", [x for x in sigs if x["sec"] == "up"], 8)
-        lines += section("🔵 하락 단계 돌파 (전일 종가 대비)", [x for x in sigs if x["sec"] == "down"], 8)
+        wide = with_theme and DIGEST_MIN >= 30      # 한 시간치 시장 묶음은 줄을 조금 더 싣는다(내 종목 글은 그대로)
+        lines += section("🔴 상승 단계 돌파 (전일 종가 대비)", [x for x in sigs if x["sec"] == "up"], 10 if wide else 8)
+        lines += section("🔵 하락 단계 돌파 (전일 종가 대비)", [x for x in sigs if x["sec"] == "down"], 10 if wide else 8)
         lines += section("📢 거래량·52주", [x for x in sigs if x["sec"] == "other"], 6)
         return lines
 
@@ -962,10 +969,13 @@ def tick():
         sig["ts"] = ts
         pending = [p for p in pending if (p["code"], p.get("sec")) != (sig["code"], sig["sec"])] + [sig]
     closing = now.time() >= datetime.time(15, 29)
-    if pending and (now.minute % DIGEST_MIN == 0 or closing):
+    if pending and ((now.hour * 60 + now.minute) % DIGEST_MIN == 0 or closing):
         first = min(p.get("ts", ts) for p in pending)
         span = ts if first == ts else f"{first}~{ts}"
-        send(compose(f"📡 시장 스파이크 {span} · 시총 1천억↑·거래대금 필터", pending, with_theme=True))
+        lines = compose(f"📡 시장 스파이크 {span} · 시총 1천억↑·거래대금 필터", pending, with_theme=True)
+        while len("\n".join(lines)) > 3900 and len(lines) > 6:     # 한 시간치가 길어도 텔레그램 한 통 한도 안으로
+            lines.pop()
+        send(lines)
         print(f"{ts} 시장 묶음 발송 {len(pending)}건")
         pending = []
     save_json(pending_path, pending)

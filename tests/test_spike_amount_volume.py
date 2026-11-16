@@ -23,6 +23,7 @@ class Bench:
         self.sent, self.quotes, self.amount, self.ranked = [], {}, set(), {}
         self.holdings, self.avg = {}, {}
         mp = monkeypatch
+        mp.setattr(sw, "DIGEST_MIN", 5)      # 이 시험들은 묶음 '내용'을 본다 — 주기는 5분으로 고정(실제 기본은 11/16부터 60분)
         mp.setattr(sw, "STATE_DIR", self.state)
         mp.setattr(sw, "read_holdings", lambda: dict(self.holdings))
         mp.setattr(sw, "read_watchlist", lambda: {})
@@ -189,3 +190,33 @@ def test_empty_amount_list_is_reported_for_ops(tmp_path, monkeypatch, capsys):
     b.ranked = {("up", "KOSPI"): [{"itemCode": "888888"}]}
     b.tick((10, 30))
     assert "수집 0건" not in capsys.readouterr().out
+
+
+def test_market_digest_goes_out_on_the_hour_and_at_close(tmp_path, monkeypatch):
+    """11/16 나-3: 시장 묶음은 정시마다(60분) + 장 마감 직전. 그사이 신호는 모아 두기만 한다."""
+    b = Bench(tmp_path, monkeypatch)
+    monkeypatch.setattr(sw, "DIGEST_MIN", 60)
+    b.amount = {"111111"}
+    b.avg = {"111111": 1_000_000}
+    b.quotes = {"111111": quote("거래폭발주", 1.2, 3_500_000)}
+    for hhmm in ((10, 3), (10, 5), (10, 30), (10, 55)):
+        b.tick(hhmm)
+    assert b.sent == []
+    b.tick((11, 0))
+    assert len(b.sent) == 1 and b.sent[0][0].startswith("📡 시장 스파이크 10:03~11:00")
+    b.avg["222222"] = 1_000_000
+    b.amount.add("222222")
+    b.quotes["222222"] = quote("오후거래주", 0.5, 4_000_000)
+    b.tick((15, 10))
+    assert len(b.sent) == 1
+    b.tick((15, 29))                                     # 마감 직전에는 정시가 아니어도 턴다
+    assert len(b.sent) == 2
+
+
+def test_my_stock_alert_is_still_immediate_with_hourly_digest(tmp_path, monkeypatch):
+    b = Bench(tmp_path, monkeypatch)
+    monkeypatch.setattr(sw, "DIGEST_MIN", 60)
+    b.holdings = {"333333": "내보유주"}
+    b.quotes = {"333333": quote("내보유주", 6.0, 500_000)}
+    b.tick((10, 7))
+    assert len(b.sent) == 1 and b.sent[0][0].startswith("📡 내 종목")
