@@ -659,6 +659,7 @@ def send(lines, reply_to=None):
     text = "\n".join(lines)
     if ("💼" in text or "⭐" in text) and EDIT_HINT not in text:
         text = text.rstrip() + "\n\n" + EDIT_HINT
+    text = _readable(text)
     if not token or not chat:
         print("[관찰모드] 발송 생략:\n" + text)
         return None
@@ -677,6 +678,21 @@ def send(lines, reply_to=None):
     except Exception as e:
         print(f"send 예외: {e}")
         return None
+
+
+def _readable(text):
+    """한자를 한글로(11/17) — 뉴스 제목에 섞여 오는 '남북경협株'·'리딩證'·'美 증시' 같은 한자(사용자는 한자를 읽지 않는다).
+    CODEX의 공용 장치(stock_alert_bot.hanja)를 서버에서 빌려 쓴다. CODEX가 없는 곳(깃허브 실행)이거나 실패하면 글 그대로."""
+    try:
+        import sys
+        codex = os.environ.get("CODEX_DIR", str(Path.home() / "codex"))
+        if codex not in sys.path:
+            sys.path.append(codex)             # 맨 뒤에 — 이 저장소의 같은 이름 모듈이 먼저 잡히게
+        from stock_alert_bot import hanja
+        out = hanja.clean(text)
+        return out if len(out) <= 4096 else text
+    except Exception:
+        return text
 
 
 def _ops_record(chat, message_id, text, token):
