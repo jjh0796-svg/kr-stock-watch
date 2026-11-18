@@ -20,7 +20,7 @@ UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 KST = datetime.timezone(datetime.timedelta(hours=9))
 MIN_LEVEL = 10            # 이 단계(%) 이상을 새로 넘었을 때만
 RECHECK_MIN = 10          # 재료 없을 때 재확인까지(분)
-GEMINI_MODELS = ("gemini-3.1-flash-lite", "gemini-3.6-flash")
+GEMINI_MODELS = ("gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash")
 GROQ_MODELS = ("qwen/qwen3.8-27b", "openai/gpt-oss-120b")
 _MACRO = re.compile(r"코스피|코스닥|증시|마감|시황|개장|특징주 모음|오늘의|\[표\]|장중 수급")
 
